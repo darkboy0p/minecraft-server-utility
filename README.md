@@ -6,7 +6,7 @@
 
 # Releases
 ![PyPI Version](https://img.shields.io/pypi/v/minecraft-server-utility)
-![PyPI Downloads](https://img.shields.io/pypi/projects/minecraft-server-utility)
+![PyPI Downloads](https://img.shields.io/pypi/dm/minecraft-server-utility)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/minecraft-server-utility)
 
 A comprehensive, cross-language library for interacting with Minecraft servers. Supports both Python and Java with a unified API.

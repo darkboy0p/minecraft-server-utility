@@ -2,40 +2,153 @@ name: Dependencies
 
 on:
   schedule:
-    - cron: '0 0 * * 0'  # Weekly
+    - cron: '0 0 * * 0'  # Weekly on Sunday at midnight
+  workflow_dispatch:  # Allow manual triggering
   push:
+    branches:
+      - main
     paths:
-      - '**/requirements.txt'
-      - '**/pom.xml'
-      - '.github/workflows/dependencies.yml'
+      - 'python/requirements.txt'
+      - 'java/pom.xml'
 
 jobs:
   update-dependencies:
     runs-on: ubuntu-latest
+    if: github.event_name != 'push' || github.repository_owner != 'dependabot[bot]'
     
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
     
     - name: Update Python dependencies
+      working-directory: ./python
       run: |
-        cd python
+        # Create requirements.in if it doesn't exist
+        if [ ! -f "requirements.in" ]; then
+          echo "requests>=2.25.0" > requirements.in
+        fi
+        
+        # Install pip-tools
         pip install pip-tools
+        
+        # Update requirements.txt
         pip-compile --upgrade requirements.in -o requirements.txt
-        echo "Python dependencies updated"
-    
-    - name: Update Java dependencies
+        
+        # Also update dev requirements
+        if [ -f "requirements-dev.in" ]; then
+          pip-compile --upgrade requirements-dev.in -o requirements-dev.txt
+        fi
+        
+        echo "✅ Python dependencies updated"
+        
+    - name: Check for Python dependency changes
+      id: py-changes
+      working-directory: ./python
       run: |
-        cd java
-        mvn versions:use-latest-versions -Dincludes="*:*"
-        echo "Java dependencies updated"
+        if git diff --exit-code requirements.txt; then
+          echo "No Python dependency changes"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "Python dependencies have changed"
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
     
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Update Java dependencies with Maven
+      working-directory: ./java
+      run: |
+        # Backup original pom.xml
+        cp pom.xml pom.xml.backup
+        
+        # Update dependencies using versions-maven-plugin
+        mvn versions:use-latest-versions \
+          -DgenerateBackupPoms=false \
+          -DexcludeReactor=true \
+          -DprocessDependencyManagement=true \
+          -Dincludes="org.json:json"
+        
+        echo "✅ Java dependencies updated"
+        
+    - name: Check for Java dependency changes
+      id: java-changes
+      working-directory: ./java
+      run: |
+        if git diff --exit-code pom.xml; then
+          echo "No Java dependency changes"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "Java dependencies have changed"
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Commit and create PR if changes exist
+      if: steps.py-changes.outputs.has_changes == 'true' || steps.java-changes.outputs.has_changes == 'true'
+      run: |
+        # Configure git
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        
+        # Create branch name with timestamp
+        BRANCH_NAME="deps/update-$(date +%Y%m%d-%H%M%S)"
+        
+        # Create and switch to branch
+        git checkout -b "$BRANCH_NAME"
+        
+        # Add changes
+        git add python/requirements.txt java/pom.xml
+        
+        # Commit changes
+        git commit -m "chore(deps): update dependencies
+        
+        - Update Python dependencies
+        - Update Java dependencies"
+        
+        # Push to remote
+        git push origin "$BRANCH_NAME"
+        
+        echo "✅ Changes pushed to branch: $BRANCH_NAME"
+        
     - name: Create Pull Request
+      if: steps.py-changes.outputs.has_changes == 'true' || steps.java-changes.outputs.has_changes == 'true'
       uses: peter-evans/create-pull-request@v5
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        commit-message: 'chore: update dependencies'
-        title: 'Weekly dependency updates'
-        body: 'Automated dependency updates'
-        branch: 'dependencies-update'
+        commit-message: "chore(deps): update dependencies"
+        title: "📦 Dependency updates"
+        body: |
+          ## Dependency Updates
+          
+          This PR updates the project dependencies to their latest versions.
+          
+          ### Changes:
+          - Updated Python dependencies in `requirements.txt`
+          - Updated Java dependencies in `pom.xml`
+          
+          ### How to review:
+          1. Check that all tests pass
+          2. Verify compatibility with existing code
+          3. Ensure no breaking changes
+          
+          **Automatically generated by GitHub Actions**
+        labels: "dependencies, automated-pr"
+        branch: "dependencies-update"
         delete-branch: true
+        draft: false
+    
+    - name: No changes needed
+      if: steps.py-changes.outputs.has_changes == 'false' && steps.java-changes.outputs.has_changes == 'false'
+      run: |
+        echo "✅ No dependency updates needed"

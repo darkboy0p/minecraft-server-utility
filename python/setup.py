@@ -1,3 +1,10 @@
+
+## **Also Update `setup.py`:**
+
+Make sure your `python/setup.py` reads from the correct README:
+
+**`python/setup.py`**:
+```python
 from setuptools import setup, find_packages
 import os
 
@@ -11,7 +18,7 @@ def get_version():
         for line in f:
             if line.startswith("__version__"):
                 return line.split("=")[1].strip().strip('"').strip("'")
-    return "0.1.0"
+    return "1.0.0"
 
 setup(
     name="minecraft-server-utility",
@@ -54,10 +61,6 @@ setup(
             "black>=23.0.0",
             "twine>=4.0.0",
             "build>=0.10.0",
-        ],
-        "docs": [
-            "pdoc3>=0.10.0",
-            "sphinx>=7.0.0",
         ],
     },
     keywords=[

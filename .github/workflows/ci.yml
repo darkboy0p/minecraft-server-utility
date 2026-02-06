@@ -1,0 +1,233 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [created]
+
+jobs:
+  # Python Package CI
+  python-ci:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11']
+    
+    defaults:
+      run:
+        working-directory: ./python
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        pip install pytest pytest-cov requests
+    
+    - name: Lint with flake8
+      run: |
+        pip install flake8
+        flake8 minecraft_server_utility --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 minecraft_server_utility --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Test with pytest
+      run: |
+        pytest tests/test_python.py -v --cov=minecraft_server_utility --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./python/coverage.xml
+        flags: python
+        name: python-${{ matrix.python-version }}
+    
+    - name: Build Python package
+      run: |
+        pip install build
+        python -m build
+    
+    - name: Upload Python artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-package-${{ matrix.python-version }}
+        path: ./python/dist/
+    
+    - name: Publish to Test PyPI
+      if: github.event_name == 'release' && matrix.python-version == '3.9'
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      run: |
+        pip install twine
+        twine upload --repository-url https://test.pypi.org/legacy/ dist/* --skip-existing
+    
+    - name: Publish to PyPI
+      if: github.event_name == 'release' && matrix.python-version == '3.9'
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        twine upload dist/*
+
+  # Java Package CI
+  java-ci:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java-version: [8, 11, 17]
+    
+    defaults:
+      run:
+        working-directory: ./java
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up JDK ${{ matrix.java-version }}
+      uses: actions/setup-java@v3
+      with:
+        java-version: ${{ matrix.java-version }}
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.m2
+        key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+        restore-keys: ${{ runner.os }}-m2
+    
+    - name: Build with Maven
+      run: mvn clean compile
+    
+    - name: Run tests
+      run: mvn test
+    
+    - name: Package JAR
+      run: mvn package -DskipTests
+    
+    - name: Upload Java artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: java-package-jdk-${{ matrix.java-version }}
+        path: ./java/target/*.jar
+    
+    - name: Deploy to GitHub Packages
+      if: github.event_name == 'release' && matrix.java-version == 11
+      run: mvn deploy
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Deploy to Maven Central (Snapshot)
+      if: github.ref == 'refs/heads/develop' && matrix.java-version == 11
+      run: mvn clean deploy -P snapshot
+      env:
+        MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+        MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+    
+    - name: Deploy to Maven Central (Release)
+      if: github.event_name == 'release' && matrix.java-version == 11
+      run: mvn clean deploy -P release -DskipTests
+      env:
+        MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+        MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+
+  # Cross-platform testing
+  cross-platform-test:
+    needs: [python-ci, java-ci]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Python Test on ${{ matrix.os }}
+      run: |
+        cd python
+        python -m pip install --upgrade pip
+        pip install -e .
+        python -c "from minecraft_server_utility import ServerPinger, MojangAPI; print('✅ Python import successful on ${{ matrix.os }}')"
+    
+    - name: Java Test on ${{ matrix.os }}
+      run: |
+        cd java
+        mvn clean compile
+        echo "✅ Java build successful on ${{ matrix.os }}"
+
+  # Documentation
+  documentation:
+    needs: [python-ci, java-ci]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Generate API documentation
+      run: |
+        cd python
+        pip install pdoc3
+        pdoc --html --output-dir ../docs/python minecraft_server_utility
+        echo "📚 Python documentation generated"
+    
+    - name: Generate Java documentation
+      run: |
+        cd java
+        mvn javadoc:javadoc
+        echo "📚 Java documentation generated"
+    
+    - name: Upload documentation
+      uses: peaceiris/actions-gh-pages@v3
+      if: github.ref == 'refs/heads/main'
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs
+        destination_dir: ./docs
+
+  # Docker Build
+  docker:
+    needs: [python-ci]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Login to DockerHub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: |
+          yourusername/minecraft-server-utility:latest
+          yourusername/minecraft-server-utility:${{ github.sha }}
+        platforms: linux/amd64,linux/arm64

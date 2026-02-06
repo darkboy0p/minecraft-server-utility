@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Set up JDK
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Update Python version
+      run: |
+        cd python
+        sed -i "s/version=\".*\"/version=\"${{ steps.get_version.outputs.VERSION }}\"/" setup.py
+        sed -i "s/__version__ = \".*\"/__version__ = \"${{ steps.get_version.outputs.VERSION }}\"/" minecraft_server_utility/__init__.py
+    
+    - name: Update Java version
+      run: |
+        cd java
+        mvn versions:set -DnewVersion=${{ steps.get_version.outputs.VERSION }}
+    
+    - name: Build Python package
+      run: |
+        cd python
+        pip install build
+        python -m build
+    
+    - name: Build Java package
+      run: |
+        cd java
+        mvn clean package
+    
+    - name: Create GitHub Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        name: Release ${{ steps.get_version.outputs.VERSION }}
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: |
+          python/dist/*
+          java/target/*.jar
+    
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        cd python
+        pip install twine
+        twine upload dist/*
+    
+    - name: Publish to Maven Central
+      env:
+        MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+        MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      run: |
+        cd java
+        mvn clean deploy -P release -DskipTests
+    
+    - name: Notify Discord
+      if: success()
+      uses: appleboy/discord-action@master
+      with:
+        webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID }}
+        webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN }}
+        username: 'Release Bot'
+        message: '🎉 New release ${{ steps.get_version.outputs.VERSION }} published! https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}'

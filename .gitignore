@@ -1,0 +1,13 @@
+# Secrets and tokens
+*.pypirc
+.env
+.env.local
+*.env
+secrets/
+tokens/
+
+# PyPI
+python/.pypirc
+python/dist/
+python/build/
+python/*.egg-info/

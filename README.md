@@ -4,6 +4,9 @@
 [![Java Version](https://img.shields.io/badge/java-8+-orange.svg)](https://www.java.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+# Releases
+![PyPI Version](https://img.shields.io/pypi/v/minecraft-server-utility)
+![PyPI Downloads](https://img.shields.io/pypi/dm/minecraft-server-utility)
 A comprehensive, cross-language library for interacting with Minecraft servers. Supports both Python and Java with a unified API.
 
 ## ✨ Features

@@ -6,12 +6,12 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="minecraft-server-utility",
     version="1.0.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="darkboy0p",
+    author_email="wardengamerofficial@gmail.com",
     description="A comprehensive library for interacting with Minecraft servers",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/minecraft-server-utility",
+    url="https://github.com/darkboy0p/minecraft-server-utility",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",

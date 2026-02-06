@@ -22,10 +22,10 @@ Example usage:
 """
 
 __version__ = "1.0.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__author__ = "darkboy0p"
+__email__ = "wardengamerofficial@gmail.com"
 __license__ = "MIT"
-__url__ = "https://github.com/yourusername/minecraft-server-utility"
+__url__ = "https://github.com/darkboy0p/minecraft-server-utility"
 
 from .server_pinger import ServerPinger
 from .bedrock_pinger import BedrockPinger

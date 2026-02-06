@@ -16,16 +16,16 @@ def get_version():
 setup(
     name="minecraft-server-utility",
     version=get_version(),
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="darkboy0p",
+    author_email="wardengamerofficial@gmail.com",
     description="A comprehensive library for interacting with Minecraft servers",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/minecraft-server-utility",
+    url="https://github.com/darkboy0p/minecraft-server-utility",
     project_urls={
-        "Bug Tracker": "https://github.com/yourusername/minecraft-server-utility/issues",
-        "Documentation": "https://github.com/yourusername/minecraft-server-utility#readme",
-        "Source Code": "https://github.com/yourusername/minecraft-server-utility",
+        "Bug Tracker": "https://github.com/darkboy0p/minecraft-server-utility/issues",
+        "Documentation": "https://github.com/darkboy0p/minecraft-server-utility#readme",
+        "Source Code": "https://github.com/darkboy0p/minecraft-server-utility",
     },
     classifiers=[
         "Development Status :: 4 - Beta",

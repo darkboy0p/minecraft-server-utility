@@ -1,0 +1,41 @@
+name: Dependencies
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly
+  push:
+    paths:
+      - '**/requirements.txt'
+      - '**/pom.xml'
+      - '.github/workflows/dependencies.yml'
+
+jobs:
+  update-dependencies:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Update Python dependencies
+      run: |
+        cd python
+        pip install pip-tools
+        pip-compile --upgrade requirements.in -o requirements.txt
+        echo "Python dependencies updated"
+    
+    - name: Update Java dependencies
+      run: |
+        cd java
+        mvn versions:use-latest-versions -Dincludes="*:*"
+        echo "Java dependencies updated"
+    
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'chore: update dependencies'
+        title: 'Weekly dependency updates'
+        body: 'Automated dependency updates'
+        branch: 'dependencies-update'
+        delete-branch: true

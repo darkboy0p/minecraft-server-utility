@@ -1,5 +1,3 @@
-I'll create a comprehensive, single-page GitHub Wiki/Documentation for your `minecraft-server-utility` package.
-
 ## **🎮 Minecraft Server Utility - Complete Documentation**
 
 ---

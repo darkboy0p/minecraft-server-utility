@@ -46,44 +46,50 @@ jobs:
         # Install pip-tools
         pip install pip-tools
         
+        # Check if requirements.txt exists, create if not
+        if [ ! -f "requirements.txt" ]; then
+          echo "📝 Creating requirements.txt..."
+          echo "requests>=2.25.0" > requirements.txt
+        fi
+        
         # Create requirements.in if it doesn't exist
         if [ ! -f "requirements.in" ]; then
-          echo "📝 Creating requirements.in from current requirements.txt..."
-          if [ -f "requirements.txt" ]; then
-            cat requirements.txt > requirements.in
-          else
-            echo "requests>=2.25.0" > requirements.in
-          fi
+          echo "📝 Creating requirements.in from requirements.txt..."
+          cp requirements.txt requirements.in
         fi
         
         # Update requirements.txt
         echo "🔄 Updating requirements.txt..."
-        pip-compile --upgrade requirements.in -o requirements.txt --resolver=backtracking
+        pip-compile --upgrade requirements.in -o requirements.txt --resolver=backtracking || {
+          echo "⚠️ pip-compile failed, using pip freeze instead..."
+          pip freeze > requirements.txt
+        }
         
         # Update dev requirements if they exist
         if [ -f "requirements-dev.in" ]; then
           echo "🔄 Updating requirements-dev.txt..."
-          pip-compile --upgrade requirements-dev.in -o requirements-dev.txt --resolver=backtracking
+          pip-compile --upgrade requirements-dev.in -o requirements-dev.txt --resolver=backtracking || true
         elif [ -f "requirements-dev.txt" ]; then
-          echo "📝 Creating requirements-dev.in from existing requirements-dev.txt..."
-          cat requirements-dev.txt > requirements-dev.in
-          pip-compile --upgrade requirements-dev.in -o requirements-dev.txt --resolver=backtracking
+          echo "📝 Creating requirements-dev.in from requirements-dev.txt..."
+          cp requirements-dev.txt requirements-dev.in
+          pip-compile --upgrade requirements-dev.in -o requirements-dev.txt --resolver=backtracking || true
         fi
         
         echo "✅ Python dependencies updated"
-        
+    
     - name: Check for Python dependency changes
       id: py-changes
       working-directory: ./python
       run: |
-        if git diff --exit-code requirements.txt; then
+        # Check if requirements.txt changed
+        if git diff --exit-code requirements.txt 2>/dev/null; then
           echo "No Python dependency changes"
           echo "has_changes=false" >> $GITHUB_OUTPUT
         else
           echo "Python dependencies have changed"
           echo "has_changes=true" >> $GITHUB_OUTPUT
           echo "📊 Changes in requirements.txt:"
-          git diff requirements.txt | head -20
+          git diff requirements.txt | head -30 || true
         fi
     
     # ============================================================
@@ -122,9 +128,11 @@ jobs:
         
         # Update dependencies using versions-maven-plugin
         echo "🔄 Updating Maven dependencies..."
-        mvn versions:update-properties -DgenerateBackupPoms=false
         
-        # Update specific dependencies
+        # Try to update properties
+        mvn versions:update-properties -DgenerateBackupPoms=false || true
+        
+        # Try to update specific dependencies
         mvn versions:use-latest-versions \
           -DgenerateBackupPoms=false \
           -DexcludeReactor=true \
@@ -133,10 +141,10 @@ jobs:
           -Dincludes="org.json:json" || true
         
         # Check if there are changes
-        if ! git diff --exit-code pom.xml; then
-          echo "✅ Java dependencies updated"
-        else
+        if git diff --exit-code pom.xml 2>/dev/null; then
           echo "ℹ️ No Java dependency updates available"
+        else
+          echo "✅ Java dependencies updated"
         fi
         
     - name: Check for Java dependency changes
@@ -144,14 +152,14 @@ jobs:
       if: steps.java-check.outputs.exists == 'true'
       working-directory: ./java
       run: |
-        if git diff --exit-code pom.xml; then
+        if git diff --exit-code pom.xml 2>/dev/null; then
           echo "No Java dependency changes"
           echo "has_changes=false" >> $GITHUB_OUTPUT
         else
           echo "Java dependencies have changed"
           echo "has_changes=true" >> $GITHUB_OUTPUT
           echo "📊 Changes in pom.xml:"
-          git diff pom.xml | head -30
+          git diff pom.xml | head -30 || true
         fi
     
     # ============================================================
@@ -164,7 +172,27 @@ jobs:
         echo "Skipping Java dependency update."
     
     # ============================================================
-    # Create Pull Request if changes exist
+    # Restore pom.xml if no changes
+    # ============================================================
+    - name: Restore pom.xml if unchanged
+      if: steps.java-check.outputs.exists == 'true'
+      working-directory: ./java
+      run: |
+        if git diff --exit-code pom.xml 2>/dev/null; then
+          rm -f pom.xml.backup
+        fi
+    
+    # ============================================================
+    # Configure Git
+    # ============================================================
+    - name: Configure Git
+      if: steps.py-changes.outputs.has_changes == 'true' || steps.java-changes.outputs.has_changes == 'true'
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    
+    # ============================================================
+    # Create Pull Request
     # ============================================================
     - name: Create Pull Request
       if: steps.py-changes.outputs.has_changes == 'true' || steps.java-changes.outputs.has_changes == 'true'
@@ -192,21 +220,21 @@ jobs:
           
           ${{ steps.py-changes.outputs.has_changes == 'true' && '**Python dependencies updated:**' || '' }}
           ${{ steps.py-changes.outputs.has_changes == 'true' && '```diff' || '' }}
-          ${{ steps.py-changes.outputs.has_changes == 'true' && git diff python/requirements.txt || '' }}
+          ${{ steps.py-changes.outputs.has_changes == 'true' && 'Changes detected in requirements.txt' || '' }}
           ${{ steps.py-changes.outputs.has_changes == 'true' && '```' || '' }}
           
           ${{ steps.java-changes.outputs.has_changes == 'true' && '**Java dependencies updated:**' || '' }}
           ${{ steps.java-changes.outputs.has_changes == 'true' && '```diff' || '' }}
-          ${{ steps.java-changes.outputs.has_changes == 'true' && git diff java/pom.xml || '' }}
+          ${{ steps.java-changes.outputs.has_changes == 'true' && 'Changes detected in pom.xml' || '' }}
           ${{ steps.java-changes.outputs.has_changes == 'true' && '```' || '' }}
           
           </details>
           
           ### ✅ How to review
-          1. ✅ Check that all tests pass
-          2. ✅ Verify compatibility with existing code
-          3. ✅ Ensure no breaking changes
-          4. ✅ Review the diff for any unexpected changes
+          1. Check that all tests pass
+          2. Verify compatibility with existing code
+          3. Ensure no breaking changes
+          4. Review the diff for any unexpected changes
           
           ### 🤖 Automation
           **This PR was automatically generated by GitHub Actions**
@@ -216,8 +244,6 @@ jobs:
         branch: "dependencies-update"
         delete-branch: true
         draft: false
-        author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-        committer: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
     
     # ============================================================
     # No changes needed

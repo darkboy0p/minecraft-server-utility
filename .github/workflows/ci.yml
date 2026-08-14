@@ -5,738 +5,369 @@ on:
     branches:
       - main
       - develop
-
   pull_request:
     branches:
       - main
-
   workflow_dispatch:
 
-
 jobs:
-
-  # ============================================================
-  # Python Package CI
-  # ============================================================
-
   python-ci:
-
     name: Python ${{ matrix.python-version }}
-
     runs-on: ubuntu-latest
-
     timeout-minutes: 10
-
     strategy:
       fail-fast: false
-
       matrix:
-        python-version:
-          - "3.8"
-          - "3.9"
-          - "3.10"
-          - "3.11"
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip setuptools wheel
 
+    - name: Create version.py if missing
+      run: |
+        mkdir -p python/minecraft_server_utility
+        if [ ! -f "python/minecraft_server_utility/version.py" ]; then
+          echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
+          echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
+        fi
 
-      # ----------------------------------------------------------
-      # Setup Python (v5)
-      # ----------------------------------------------------------
+    - name: Install package
+      working-directory: ./python
+      run: python -m pip install -e .
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
+    - name: Install development dependencies
+      run: |
+        python -m pip install \
+          "pytest>=7.0.0" \
+          "pytest-cov>=4.0.0" \
+          "flake8>=6.0.0" \
+          "build>=0.10.0" \
+          "pytest-mock>=3.10.0"
 
+    - name: Verify package import
+      working-directory: ./python
+      run: |
+        python -c "
+import sys
+import os
+sys.path.insert(0, os.getcwd())
+try:
+    from minecraft_server_utility import __version__, ServerPinger, MojangAPI
+    print(f'✅ Package imported successfully')
+    print(f'✅ Version: {__version__}')
+except Exception as e:
+    print(f'❌ Import failed: {e}')
+    sys.exit(1)
+"
 
-      # ----------------------------------------------------------
-      # Upgrade pip
-      # ----------------------------------------------------------
+    - name: Lint with flake8
+      continue-on-error: true
+      run: python -m flake8 python/ --count --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Upgrade pip
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
+    - name: Run tests
+      continue-on-error: true
+      working-directory: ./python
+      run: |
+        if [ -d "../tests" ]; then
+          PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ -v --tb=short --disable-warnings
+        else
+          echo "⚠️ No tests directory found."
+        fi
 
+    - name: Run tests with coverage
+      continue-on-error: true
+      working-directory: ./python
+      run: |
+        if [ -d "../tests" ]; then
+          PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ \
+            --cov=./minecraft_server_utility \
+            --cov-report=term-missing \
+            --cov-report=xml:../coverage.xml \
+            -v --tb=short --disable-warnings
+        fi
 
-      # ----------------------------------------------------------
-      # Install package
-      # ----------------------------------------------------------
+    - name: Upload coverage report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-python-${{ matrix.python-version }}
+        path: coverage.xml
+        retention-days: 7
+        if-no-files-found: ignore
 
-      - name: Install package
-        working-directory: ./python
-        run: |
-          python -m pip install -e .
+    - name: Build package
+      working-directory: ./python
+      run: python -m build
 
+    - name: Verify package
+      working-directory: ./python
+      run: |
+        ls -lah dist/
+        python -m pip install twine
+        python -m twine check dist/*
+        echo "✅ Python package build successful"
 
-      # ----------------------------------------------------------
-      # Install development dependencies
-      # ----------------------------------------------------------
-
-      - name: Install development dependencies
-        run: |
-          python -m pip install \
-            "pytest>=7.0.0" \
-            "pytest-cov>=4.0.0" \
-            "flake8>=6.0.0" \
-            "build>=0.10.0" \
-            "pytest-mock>=3.10.0"
-
-
-      # ----------------------------------------------------------
-      # Verify package import
-      # ----------------------------------------------------------
-
-      - name: Verify package import
-        working-directory: ./python
-        run: |
-          python - <<'PY'
-          import sys
-          import os
-          
-          # Add current directory to path
-          sys.path.insert(0, os.getcwd())
-          
-          try:
-              from minecraft_server_utility import __version__, ServerPinger, MojangAPI
-              print("✅ Package imported successfully")
-              print(f"✅ Version: {__version__}")
-              print(f"✅ ServerPinger: {ServerPinger}")
-              print(f"✅ MojangAPI: {MojangAPI}")
-          except ImportError as e:
-              print(f"❌ Import failed: {e}")
-              sys.exit(1)
-          except Exception as e:
-              print(f"❌ Unexpected error: {e}")
-              sys.exit(1)
-          PY
-
-
-      # ----------------------------------------------------------
-      # Lint with flake8
-      # ----------------------------------------------------------
-
-      - name: Lint with flake8
-        continue-on-error: true
-        run: |
-          python -m flake8 python/ \
-            --count \
-            --max-complexity=10 \
-            --max-line-length=127 \
-            --statistics
-
-
-      # ----------------------------------------------------------
-      # Run tests (with continue-on-error to see all failures)
-      # ----------------------------------------------------------
-
-      - name: Run tests
-        id: run-tests
-        continue-on-error: true
-        run: |
-          if [ -d "tests" ]; then
-            cd python
-            PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ -v --tb=short --disable-warnings
-          else
-            echo "⚠️ No tests directory found."
-          fi
-
-
-      # ----------------------------------------------------------
-      # Run tests with coverage
-      # ----------------------------------------------------------
-
-      - name: Run tests with coverage
-        continue-on-error: true
-        run: |
-          if [ -d "tests" ]; then
-            cd python
-            PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ \
-              --cov=./minecraft_server_utility \
-              --cov-report=term-missing \
-              --cov-report=xml:../coverage.xml \
-              -v --tb=short --disable-warnings
-          else
-            echo "⚠️ No tests directory found."
-          fi
-
-
-      # ----------------------------------------------------------
-      # Upload coverage report (v4)
-      # ----------------------------------------------------------
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-python-${{ matrix.python-version }}
-          path: coverage.xml
-          retention-days: 7
-          if-no-files-found: ignore
-
-
-      # ----------------------------------------------------------
-      # Build package
-      # ----------------------------------------------------------
-
-      - name: Build package
-        working-directory: ./python
-        run: |
-          python -m build
-
-
-      # ----------------------------------------------------------
-      # Verify package
-      # ----------------------------------------------------------
-
-      - name: Verify package
-        working-directory: ./python
-        run: |
-          echo "========================================"
-          echo "Package files"
-          echo "========================================"
-
-          ls -lah dist/
-
-          python -m pip install twine
-
-          python -m twine check dist/*
-
-          echo ""
-          echo "✅ Python package build successful"
-          echo "✅ Package verification successful"
-
-
-      # ----------------------------------------------------------
-      # Upload Python package artifacts (v4)
-      # ----------------------------------------------------------
-
-      - name: Upload Python package artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-${{ matrix.python-version }}
-          path: python/dist/
-          retention-days: 7
-          if-no-files-found: ignore
-
-
-  # ============================================================
-  # Java CI (with v5 actions)
-  # ============================================================
+    - name: Upload Python package artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package-${{ matrix.python-version }}
+        path: python/dist/
+        retention-days: 7
+        if-no-files-found: ignore
 
   java-ci:
-
     name: Java ${{ matrix.java-version }}
-
     runs-on: ubuntu-latest
-
     timeout-minutes: 10
-
     strategy:
       fail-fast: false
-
       matrix:
-        java-version:
-          - "11"
-          - "17"
+        java-version: ["11", "17"]
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
+    - name: Check Java project
+      id: java-check
+      run: |
+        if [ -f "java/pom.xml" ]; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "✅ Java Maven project found"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "⚠️ No java/pom.xml found"
+        fi
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Set up JDK ${{ matrix.java-version }}
+      if: steps.java-check.outputs.exists == 'true'
+      uses: actions/setup-java@v5
+      with:
+        java-version: ${{ matrix.java-version }}
+        distribution: temurin
+        cache: maven
 
+    - name: Build with Maven
+      if: steps.java-check.outputs.exists == 'true'
+      continue-on-error: true
+      working-directory: ./java
+      run: mvn -B clean compile
 
-      # ----------------------------------------------------------
-      # Check whether Java project exists
-      # ----------------------------------------------------------
+    - name: Run Java tests
+      if: steps.java-check.outputs.exists == 'true'
+      continue-on-error: true
+      working-directory: ./java
+      run: mvn -B test
 
-      - name: Check Java project
-        id: java-check
-        run: |
-          if [ -f "java/pom.xml" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Java Maven project found"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ No java/pom.xml found"
-          fi
+    - name: Verify Java build
+      if: steps.java-check.outputs.exists == 'true'
+      working-directory: ./java
+      run: |
+        if [ -d "target" ]; then
+          ls -la target/
+          echo "✅ Java build successful for JDK ${{ matrix.java-version }}"
+        else
+          echo "⚠️ Target directory not found"
+        fi
 
+    - name: Package Java project
+      if: steps.java-check.outputs.exists == 'true'
+      continue-on-error: true
+      working-directory: ./java
+      run: mvn -B package -DskipTests
 
-      # ----------------------------------------------------------
-      # Setup Java (v5 - fixed deprecation)
-      # ----------------------------------------------------------
+    - name: Upload Java artifacts
+      if: steps.java-check.outputs.exists == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: java-package-${{ matrix.java-version }}
+        path: java/target/*.jar
+        retention-days: 7
+        if-no-files-found: ignore
 
-      - name: Set up JDK ${{ matrix.java-version }}
-        if: steps.java-check.outputs.exists == 'true'
-        uses: actions/setup-java@v5
-        with:
-          java-version: ${{ matrix.java-version }}
-          distribution: temurin
-          cache: maven
-
-
-      # ----------------------------------------------------------
-      # Build Java project
-      # ----------------------------------------------------------
-
-      - name: Build with Maven
-        if: steps.java-check.outputs.exists == 'true'
-        continue-on-error: true
-        working-directory: ./java
-        run: |
-          mvn -B clean compile
-
-
-      # ----------------------------------------------------------
-      # Run Java tests
-      # ----------------------------------------------------------
-
-      - name: Run Java tests
-        if: steps.java-check.outputs.exists == 'true'
-        continue-on-error: true
-        working-directory: ./java
-        run: |
-          mvn -B test
-
-
-      # ----------------------------------------------------------
-      # Verify Java build
-      # ----------------------------------------------------------
-
-      - name: Verify Java build
-        if: steps.java-check.outputs.exists == 'true'
-        working-directory: ./java
-        run: |
-          echo "========================================"
-          echo "Java build output"
-          echo "========================================"
-
-          if [ -d "target" ]; then
-            ls -la target/
-            echo ""
-            echo "✅ Java build successful for JDK ${{ matrix.java-version }}"
-          else
-            echo "⚠️ Target directory not found"
-          fi
-
-
-      # ----------------------------------------------------------
-      # Package Java project
-      # ----------------------------------------------------------
-
-      - name: Package Java project
-        if: steps.java-check.outputs.exists == 'true'
-        continue-on-error: true
-        working-directory: ./java
-        run: |
-          mvn -B package -DskipTests
-
-
-      # ----------------------------------------------------------
-      # Upload Java artifacts (v4)
-      # ----------------------------------------------------------
-
-      - name: Upload Java artifacts
-        if: steps.java-check.outputs.exists == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: java-package-${{ matrix.java-version }}
-          path: java/target/*.jar
-          retention-days: 7
-          if-no-files-found: ignore
-
-
-      # ----------------------------------------------------------
-      # Skip Java if not present
-      # ----------------------------------------------------------
-
-      - name: Java project not found
-        if: steps.java-check.outputs.exists == 'false'
-        run: |
-          echo "⚠️ Java project not found."
-          echo "Skipping Java build."
-
-
-  # ============================================================
-  # Documentation
-  # ============================================================
+    - name: Java project not found
+      if: steps.java-check.outputs.exists == 'false'
+      run: echo "⚠️ Java project not found. Skipping Java build."
 
   docs:
-
     name: Generate Documentation
-
     runs-on: ubuntu-latest
-
-    needs:
-      - python-ci
-      - java-ci
-
+    needs: [python-ci, java-ci]
     if: success()
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Create version.py if missing
+      run: |
+        mkdir -p python/minecraft_server_utility
+        if [ ! -f "python/minecraft_server_utility/version.py" ]; then
+          echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
+          echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
+        fi
 
+    - name: Install package
+      working-directory: ./python
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install .
 
-      # ----------------------------------------------------------
-      # Setup Python (v5)
-      # ----------------------------------------------------------
+    - name: Install documentation tools
+      run: python -m pip install pdoc3
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+    - name: Generate Python documentation
+      continue-on-error: true
+      run: |
+        mkdir -p docs/python
+        python -m pdoc --html python/minecraft_server_utility --output-dir docs/python --force
 
+    - name: Check Java documentation
+      id: java-doc-check
+      run: |
+        if [ -f "java/pom.xml" ]; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        fi
 
-      # ----------------------------------------------------------
-      # Install package
-      # ----------------------------------------------------------
+    - name: Set up JDK
+      if: steps.java-doc-check.outputs.exists == 'true'
+      uses: actions/setup-java@v5
+      with:
+        java-version: "17"
+        distribution: temurin
+        cache: maven
 
-      - name: Install package
-        working-directory: ./python
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install .
+    - name: Generate Java documentation
+      if: steps.java-doc-check.outputs.exists == 'true'
+      continue-on-error: true
+      working-directory: ./java
+      run: |
+        mvn -B javadoc:javadoc
+        mkdir -p ../docs/java
+        if [ -d "target/site/apidocs" ]; then
+          cp -r target/site/apidocs/* ../docs/java/
+        fi
 
+    - name: Generate documentation index
+      run: |
+        cat > docs/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><title>Minecraft Server Utility - Documentation</title>
+        <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; color: #333; }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        .card { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #3498db; }
+        .card h2 { margin-top: 0; color: #2c3e50; }
+        a { color: #3498db; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-python { background: #3776AB; color: white; }
+        .badge-java { background: #f89820; color: white; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 14px; }
+        </style>
+        </head>
+        <body>
+        <h1>📚 Minecraft Server Utility</h1>
+        <p>Comprehensive documentation for the Minecraft Server Utility library.</p>
+        <div class="card"><h2>🐍 Python Documentation</h2><p>Complete Python API reference.</p><a href="python/minecraft_server_utility/index.html">View Python Docs →</a></div>
+        <div class="card"><h2>☕ Java Documentation</h2><p>Complete Java API reference.</p><a href="java/index.html">View Java Docs →</a></div>
+        <div class="footer">
+        <p><span class="badge badge-python">Python 3.7+</span> <span class="badge badge-java">Java 8+</span></p>
+        <p><a href="https://github.com/darkboy0p/minecraft-server-utility">GitHub Repository</a> | <a href="https://pypi.org/project/minecraft-server-utility/">PyPI</a></p>
+        <p>Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
+        </div>
+        </body>
+        </html>
+        EOF
 
-      # ----------------------------------------------------------
-      # Install documentation tools
-      # ----------------------------------------------------------
-
-      - name: Install documentation tools
-        run: |
-          python -m pip install pdoc3
-
-
-      # ----------------------------------------------------------
-      # Generate Python documentation
-      # ----------------------------------------------------------
-
-      - name: Generate Python documentation
-        continue-on-error: true
-        run: |
-          mkdir -p docs/python
-
-          python -m pdoc \
-            --html \
-            python/minecraft_server_utility \
-            --output-dir docs/python \
-            --force
-
-
-      # ----------------------------------------------------------
-      # Generate Java documentation if available (v5)
-      # ----------------------------------------------------------
-
-      - name: Check Java documentation
-        id: java-doc-check
-        run: |
-          if [ -f "java/pom.xml" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-
-      - name: Set up JDK
-        if: steps.java-doc-check.outputs.exists == 'true'
-        uses: actions/setup-java@v5
-        with:
-          java-version: "17"
-          distribution: temurin
-          cache: maven
-
-
-      - name: Generate Java documentation
-        if: steps.java-doc-check.outputs.exists == 'true'
-        continue-on-error: true
-        working-directory: ./java
-        run: |
-          mvn -B javadoc:javadoc
-
-          mkdir -p ../docs/java
-
-          if [ -d "target/site/apidocs" ]; then
-            cp -r target/site/apidocs/* ../docs/java/
-          fi
-
-
-      # ----------------------------------------------------------
-      # Generate combined documentation index
-      # ----------------------------------------------------------
-
-      - name: Generate documentation index
-        run: |
-          cat > docs/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-              <meta charset="UTF-8">
-              <title>Minecraft Server Utility - Documentation</title>
-              <style>
-                  body {
-                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-                      max-width: 800px;
-                      margin: 40px auto;
-                      padding: 20px;
-                      line-height: 1.6;
-                      color: #333;
-                  }
-                  h1 {
-                      color: #2c3e50;
-                      border-bottom: 3px solid #3498db;
-                      padding-bottom: 10px;
-                  }
-                  .card {
-                      background: #f8f9fa;
-                      border-radius: 8px;
-                      padding: 20px;
-                      margin: 20px 0;
-                      border-left: 4px solid #3498db;
-                  }
-                  .card h2 {
-                      margin-top: 0;
-                      color: #2c3e50;
-                  }
-                  a {
-                      color: #3498db;
-                      text-decoration: none;
-                  }
-                  a:hover {
-                      text-decoration: underline;
-                  }
-                  .badge {
-                      display: inline-block;
-                      padding: 4px 12px;
-                      border-radius: 20px;
-                      font-size: 12px;
-                      font-weight: 600;
-                  }
-                  .badge-python {
-                      background: #3776AB;
-                      color: white;
-                  }
-                  .badge-java {
-                      background: #f89820;
-                      color: white;
-                  }
-                  .footer {
-                      margin-top: 40px;
-                      padding-top: 20px;
-                      border-top: 1px solid #eee;
-                      color: #666;
-                      font-size: 14px;
-                  }
-              </style>
-          </head>
-          <body>
-              <h1>📚 Minecraft Server Utility</h1>
-              <p>Comprehensive documentation for the Minecraft Server Utility library.</p>
-              
-              <div class="card">
-                  <h2>🐍 Python Documentation</h2>
-                  <p>Complete Python API reference.</p>
-                  <a href="python/minecraft_server_utility/index.html">View Python Docs →</a>
-              </div>
-              
-              <div class="card">
-                  <h2>☕ Java Documentation</h2>
-                  <p>Complete Java API reference.</p>
-                  <a href="java/index.html">View Java Docs →</a>
-              </div>
-              
-              <div class="footer">
-                  <p>
-                      <span class="badge badge-python">Python 3.7+</span>
-                      <span class="badge badge-java">Java 8+</span>
-                  </p>
-                  <p>
-                      <a href="https://github.com/darkboy0p/minecraft-server-utility">GitHub Repository</a> |
-                      <a href="https://pypi.org/project/minecraft-server-utility/">PyPI</a>
-                  </p>
-                  <p>Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")</p>
-              </div>
-          </body>
-          </html>
-          EOF
-
-
-      # ----------------------------------------------------------
-      # Upload documentation (v4)
-      # ----------------------------------------------------------
-
-      - name: Upload documentation
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentation
-          path: docs/
-          retention-days: 7
-
-
-  # ============================================================
-  # Test Report
-  # ============================================================
+    - name: Upload documentation
+      uses: actions/upload-artifact@v4
+      with:
+        name: documentation
+        path: docs/
+        retention-days: 7
 
   test-report:
-
     name: Test Report
-
     runs-on: ubuntu-latest
-
-    needs:
-      - python-ci
-      - java-ci
-
+    needs: [python-ci, java-ci]
     if: always()
 
     steps:
+    - name: Generate test report
+      run: |
+        cat > test-report.md << 'EOF'
+        # Test Results
+        **Commit:** ${{ github.sha }}
+        **Repository:** ${{ github.repository }}
+        **Branch:** ${{ github.ref_name }}
+        ## Jobs Status
+        | Job | Status |
+        |-----|--------|
+        | Python CI | ${{ needs.python-ci.result }} |
+        | Java CI | ${{ needs.java-ci.result }} |
+        ## Summary
+        EOF
+        if [ "${{ needs.python-ci.result }}" = "success" ] && [ "${{ needs.java-ci.result }}" = "success" ]; then
+          echo "✅ All tests passed!" >> test-report.md
+        elif [ "${{ needs.python-ci.result }}" = "failure" ] || [ "${{ needs.java-ci.result }}" = "failure" ]; then
+          echo "❌ Some tests failed!" >> test-report.md
+        else
+          echo "⚠️ Tests were skipped or cancelled." >> test-report.md
+        fi
+        echo "" >> test-report.md
+        echo "**Run completed:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> test-report.md
 
-      - name: Generate test report
-        run: |
-          cat > test-report.md << 'EOF'
-          # Test Results
-          
-          **Commit:** ${{ github.sha }}
-          
-          **Repository:** ${{ github.repository }}
-          
-          **Branch:** ${{ github.ref_name }}
-          
-          **Run ID:** ${{ github.run_id }}
-          
-          ## Jobs Status
-          
-          | Job | Status |
-          |-----|--------|
-          | Python CI | ${{ needs.python-ci.result }} |
-          | Java CI | ${{ needs.java-ci.result }} |
-          
-          ## Summary
-          
-          EOF
-          
-          if [ "${{ needs.python-ci.result }}" = "success" ] && [ "${{ needs.java-ci.result }}" = "success" ]; then
-            echo "✅ All tests passed!" >> test-report.md
-          elif [ "${{ needs.python-ci.result }}" = "failure" ] || [ "${{ needs.java-ci.result }}" = "failure" ]; then
-            echo "❌ Some tests failed!" >> test-report.md
-          else
-            echo "⚠️ Tests were skipped or cancelled." >> test-report.md
-          fi
-          
-          echo "" >> test-report.md
-          echo "**Run completed:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> test-report.md
-
-
-      - name: Upload test report (v4)
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-report
-          path: test-report.md
-          retention-days: 7
-
-
-  # ============================================================
-  # Combined Artifacts (for release)
-  # ============================================================
+    - name: Upload test report
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-report
+        path: test-report.md
+        retention-days: 7
 
   combine-artifacts:
-
     name: Combine Artifacts
-
     runs-on: ubuntu-latest
-
-    needs:
-      - python-ci
-      - java-ci
-      - docs
-
+    needs: [python-ci, java-ci, docs]
     if: success() && github.ref == 'refs/heads/main'
 
     steps:
+    - name: Create combined artifacts directory
+      run: |
+        mkdir -p combined-artifacts
+        cat > combined-artifacts/README.md << 'EOF'
+        # Minecraft Server Utility - Build Artifacts
+        ## Python Packages
+        - Available on PyPI: https://pypi.org/project/minecraft-server-utility/
+        ## Java Packages
+        - Available via GitHub Packages
+        ## Documentation
+        - Available in the documentation artifact
+        **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        EOF
 
-      - name: Create combined artifacts directory
-        run: |
-          mkdir -p combined-artifacts
-          
-          cat > combined-artifacts/README.md << 'EOF'
-          # Minecraft Server Utility - Build Artifacts
-          
-          ## Python Packages
-          - The Python package is available on PyPI: https://pypi.org/project/minecraft-server-utility/
-          
-          ## Java Packages
-          - The Java package is available via GitHub Packages
-          
-          ## Documentation
-          - Documentation is available in the documentation artifact
-          
-          **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          EOF
-
-      - name: Upload combined artifacts (v4)
-        uses: actions/upload-artifact@v4
-        with:
-          name: combined-artifacts
-          path: combined-artifacts/
-          retention-days: 7
-
-
-  # ============================================================
-  # Final Status Check
-  # ============================================================
-
-  final-status:
-
-    name: Final Status
-
-    runs-on: ubuntu-latest
-
-    needs:
-      - python-ci
-      - java-ci
-      - docs
-      - test-report
-
-    if: always()
-
-    steps:
-      - name: Check final status
-        run: |
-          echo "========================================"
-          echo "📊 CI/CD Pipeline Status"
-          echo "========================================"
-          echo ""
-          echo "Python CI: ${{ needs.python-ci.result }}"
-          echo "Java CI: ${{ needs.java-ci.result }}"
-          echo "Documentation: ${{ needs.docs.result }}"
-          echo "Test Report: ${{ needs.test-report.result }}"
-          echo ""
-          
-          if [ "${{ needs.python-ci.result }}" = "success" ] && \
-             [ "${{ needs.java-ci.result }}" = "success" ] && \
-             [ "${{ needs.docs.result }}" = "success" ]; then
-            echo "✅ All CI jobs passed!"
-            exit 0
-          else
-            echo "⚠️ Some CI jobs failed or were skipped."
-            echo "Check the logs above for details."
-            exit 1
-          fi
+    - name: Upload combined artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: combined-artifacts
+        path: combined-artifacts/
+        retention-days: 7

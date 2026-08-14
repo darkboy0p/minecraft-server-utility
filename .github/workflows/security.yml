@@ -2,553 +2,251 @@ name: Security Scan
 
 on:
   push:
-    branches:
-      - main
-      - develop
-
+    branches: [ main, develop ]
   pull_request:
-    branches:
-      - main
-
+    branches: [ main ]
   schedule:
     - cron: "0 2 * * *"
-
   workflow_dispatch:
 
-
 jobs:
-
-  # ============================================================
-  # Python Dependency Security
-  # ============================================================
-
   dependency-check:
-
     name: Dependency Security Scan
-
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Create version.py if missing
+      run: |
+        mkdir -p python/minecraft_server_utility
+        if [ ! -f "python/minecraft_server_utility/version.py" ]; then
+          echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
+          echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
+        fi
 
+    - name: Python dependency security scan
+      run: |
+        echo "🔍 Checking Python dependencies..."
+        python -m pip install --upgrade pip
+        python -m pip install safety
+        if [ -f "python/requirements.txt" ]; then
+          safety check -r python/requirements.txt --output text || true
+        elif [ -f "requirements.txt" ]; then
+          safety check -r requirements.txt --output text || true
+        else
+          echo "⚠️ No requirements.txt found."
+        fi
 
-      # ----------------------------------------------------------
-      # Setup Python
-      # ----------------------------------------------------------
+    - name: Check Java project
+      id: java-check
+      run: |
+        if [ -f "java/pom.xml" ]; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "✅ Java Maven project found"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "⚠️ Java Maven project not found"
+        fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+    - name: Set up Java
+      if: steps.java-check.outputs.exists == 'true'
+      uses: actions/setup-java@v5
+      with:
+        java-version: "17"
+        distribution: temurin
+        cache: maven
 
+    - name: Install OWASP Dependency-Check
+      if: steps.java-check.outputs.exists == 'true'
+      working-directory: ./java
+      run: |
+        echo "📦 Installing OWASP Dependency-Check..."
+        VERSION="8.3.1"
+        wget -q -O dependency-check.zip "https://github.com/jeremylong/DependencyCheck/releases/download/v${VERSION}/dependency-check-${VERSION}-release.zip"
+        unzip -q dependency-check.zip
+        rm dependency-check.zip
+        mkdir -p reports
+        echo "✅ Dependency-Check installed"
 
-      # ----------------------------------------------------------
-      # Python dependency scan
-      # ----------------------------------------------------------
+    - name: Run Java dependency security scan
+      if: steps.java-check.outputs.exists == 'true'
+      working-directory: ./java
+      run: |
+        echo "🔍 Scanning Java dependencies..."
+        ./dependency-check/bin/dependency-check.sh \
+          --project "minecraft-server-utility" \
+          --scan "." \
+          --out "./reports" \
+          --format HTML \
+          --format JSON \
+          --failOnCVSS 9 \
+          --enableExperimental || true
+        echo "✅ Java dependency scan completed"
 
-      - name: Python dependency security scan
-        run: |
-          echo "🔍 Checking Python dependencies..."
-
-          python -m pip install --upgrade pip
-
-          python -m pip install safety
-
-          if [ -f "python/requirements.txt" ]; then
-            echo "📦 Found python/requirements.txt"
-
-            safety check \
-              -r python/requirements.txt \
-              --output text || true
-
-          elif [ -f "requirements.txt" ]; then
-            echo "📦 Found requirements.txt"
-
-            safety check \
-              -r requirements.txt \
-              --output text || true
-
-          else
-            echo "⚠️ No requirements.txt found."
-
-            echo "Checking package metadata instead..."
-
-            if [ -f "python/setup.py" ]; then
-              python -m pip install ./python
-              python -m pip list
-            fi
-          fi
-
-
-      # ----------------------------------------------------------
-      # Check Java project
-      # ----------------------------------------------------------
-
-      - name: Check Java project
-        id: java-check
-        run: |
-          if [ -f "java/pom.xml" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Java Maven project found"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Java Maven project not found"
-          fi
-
-
-      # ----------------------------------------------------------
-      # Setup Java
-      # ----------------------------------------------------------
-
-      - name: Set up Java
-        if: steps.java-check.outputs.exists == 'true'
-        uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: temurin
-          cache: maven
-
-
-      # ----------------------------------------------------------
-      # OWASP Dependency Check
-      # ----------------------------------------------------------
-
-      - name: Install OWASP Dependency-Check
-        if: steps.java-check.outputs.exists == 'true'
-        working-directory: ./java
-        run: |
-          echo "📦 Installing OWASP Dependency-Check..."
-
-          VERSION="8.3.1"
-
-          wget -q \
-            -O dependency-check.zip \
-            "https://github.com/jeremylong/DependencyCheck/releases/download/v${VERSION}/dependency-check-${VERSION}-release.zip"
-
-          unzip -q dependency-check.zip
-
-          rm dependency-check.zip
-
-          mkdir -p reports
-
-          echo "✅ Dependency-Check installed"
-
-
-      # ----------------------------------------------------------
-      # Run OWASP scan
-      # ----------------------------------------------------------
-
-      - name: Run Java dependency security scan
-        if: steps.java-check.outputs.exists == 'true'
-        working-directory: ./java
-        run: |
-          echo "🔍 Scanning Java dependencies..."
-
-          ./dependency-check/bin/dependency-check.sh \
-            --project "minecraft-server-utility" \
-            --scan "." \
-            --out "./reports" \
-            --format HTML \
-            --format JSON \
-            --failOnCVSS 9 \
-            --enableExperimental || true
-
-          echo "✅ Java dependency scan completed"
-
-
-      # ----------------------------------------------------------
-      # Skip Java
-      # ----------------------------------------------------------
-
-      - name: Java project not found
-        if: steps.java-check.outputs.exists == 'false'
-        run: |
-          echo "⚠️ No Java project found."
-          echo "Skipping Java dependency scan."
-
-
-      # ----------------------------------------------------------
-      # Upload reports
-      # ----------------------------------------------------------
-
-      - name: Upload security reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-reports-${{ github.sha }}
-          path: |
-            java/reports/
-          retention-days: 7
-          if-no-files-found: ignore
-
-
-  # ============================================================
-  # Snyk Security
-  # ============================================================
+    - name: Upload security reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports-${{ github.sha }}
+        path: java/reports/
+        retention-days: 7
+        if-no-files-found: ignore
 
   snyk-security:
-
     name: Snyk Security Scan
-
     runs-on: ubuntu-latest
-
     continue-on-error: true
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
+    - name: Check Snyk configuration
+      id: snyk-check
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      run: |
+        if [ -n "$SNYK_TOKEN" ]; then
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "✅ Snyk token configured"
+        else
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          echo "⚠️ Snyk token not configured"
+        fi
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Set up Python
+      if: steps.snyk-check.outputs.configured == 'true'
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
 
+    - name: Install Snyk CLI
+      if: steps.snyk-check.outputs.configured == 'true'
+      run: npm install -g snyk
 
-      # ----------------------------------------------------------
-      # Check Snyk token
-      # ----------------------------------------------------------
-
-      - name: Check Snyk configuration
-        id: snyk-check
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          if [ -n "$SNYK_TOKEN" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Snyk token configured"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Snyk token not configured"
-            echo "Snyk scans will be skipped."
-          fi
-
-
-      # ----------------------------------------------------------
-      # Setup Python
-      # ----------------------------------------------------------
-
-      - name: Set up Python
-        if: steps.snyk-check.outputs.configured == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-
-      # ----------------------------------------------------------
-      # Install Snyk CLI
-      # ----------------------------------------------------------
-
-      - name: Install Snyk CLI
-        if: steps.snyk-check.outputs.configured == 'true'
-        run: |
-          npm install -g snyk
-
-
-      # ----------------------------------------------------------
-      # Snyk Python
-      # ----------------------------------------------------------
-
-      - name: Run Snyk for Python
-        if: steps.snyk-check.outputs.configured == 'true'
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          echo "🔍 Running Snyk scan for Python..."
-          
-          if [ -d "python" ]; then
-            cd python
-            snyk test --severity-threshold=high || true
-            cd ..
-          else
-            snyk test --severity-threshold=high || true
-          fi
-        continue-on-error: true
-
-
-      # ----------------------------------------------------------
-      # Check Java
-      # ----------------------------------------------------------
-
-      - name: Check Java project
-        if: steps.snyk-check.outputs.configured == 'true'
-        id: java-snyk-check
-        run: |
-          if [ -f "java/pom.xml" ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Java Maven project found"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Java Maven project not found"
-          fi
-
-
-      # ----------------------------------------------------------
-      # Setup Java
-      # ----------------------------------------------------------
-
-      - name: Set up Java
-        if: |
-          steps.snyk-check.outputs.configured == 'true' &&
-          steps.java-snyk-check.outputs.exists == 'true'
-        uses: actions/setup-java@v4
-        with:
-          java-version: "17"
-          distribution: temurin
-          cache: maven
-
-
-      # ----------------------------------------------------------
-      # Snyk Java
-      # ----------------------------------------------------------
-
-      - name: Run Snyk for Java
-        if: |
-          steps.snyk-check.outputs.configured == 'true' &&
-          steps.java-snyk-check.outputs.exists == 'true'
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        working-directory: ./java
-        run: |
-          echo "🔍 Running Snyk scan for Java..."
+    - name: Run Snyk for Python
+      if: steps.snyk-check.outputs.configured == 'true'
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      run: |
+        echo "🔍 Running Snyk scan for Python..."
+        if [ -d "python" ]; then
+          cd python
           snyk test --severity-threshold=high || true
-        continue-on-error: true
+          cd ..
+        else
+          snyk test --severity-threshold=high || true
+        fi
+      continue-on-error: true
 
+    - name: Check Java project
+      if: steps.snyk-check.outputs.configured == 'true'
+      id: java-snyk-check
+      run: |
+        if [ -f "java/pom.xml" ]; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        fi
 
-      # ----------------------------------------------------------
-      # Snyk Monitor
-      # ----------------------------------------------------------
+    - name: Set up Java
+      if: |
+        steps.snyk-check.outputs.configured == 'true' &&
+        steps.java-snyk-check.outputs.exists == 'true'
+      uses: actions/setup-java@v5
+      with:
+        java-version: "17"
+        distribution: temurin
+        cache: maven
 
-      - name: Snyk Monitor
-        if: |
-          steps.snyk-check.outputs.configured == 'true' &&
-          steps.java-snyk-check.outputs.exists == 'true'
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        working-directory: ./java
-        run: |
-          echo "📊 Running Snyk monitor..."
-          snyk monitor || true
-        continue-on-error: true
+    - name: Run Snyk for Java
+      if: |
+        steps.snyk-check.outputs.configured == 'true' &&
+        steps.java-snyk-check.outputs.exists == 'true'
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      working-directory: ./java
+      run: |
+        echo "🔍 Running Snyk scan for Java..."
+        snyk test --severity-threshold=high || true
+      continue-on-error: true
 
+    - name: Snyk Monitor
+      if: |
+        steps.snyk-check.outputs.configured == 'true' &&
+        steps.java-snyk-check.outputs.exists == 'true'
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      working-directory: ./java
+      run: |
+        echo "📊 Running Snyk monitor..."
+        snyk monitor || true
+      continue-on-error: true
 
-      # ----------------------------------------------------------
-      # Snyk skipped
-      # ----------------------------------------------------------
-
-      - name: Snyk not configured
-        if: steps.snyk-check.outputs.configured == 'false'
-        run: |
-          echo "ℹ️ Snyk was skipped."
-          echo ""
-          echo "To enable Snyk:"
-          echo "1. Create a Snyk account"
-          echo "2. Create an API token"
-          echo "3. Add it to GitHub Secrets as:"
-          echo ""
-          echo "SNYK_TOKEN"
-
-
-      # ----------------------------------------------------------
-      # Bandit Security Scan (Python)
-      # ----------------------------------------------------------
+    - name: Snyk not configured
+      if: steps.snyk-check.outputs.configured == 'false'
+      run: |
+        echo "ℹ️ Snyk was skipped."
+        echo "To enable Snyk:"
+        echo "1. Create a Snyk account"
+        echo "2. Create an API token"
+        echo "3. Add it to GitHub Secrets as: SNYK_TOKEN"
 
   bandit-security:
-
     name: Bandit Security Scan
-
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Install Bandit
+      run: pip install bandit
 
+    - name: Run Bandit security scan
+      run: |
+        echo "🔍 Running Bandit security scan..."
+        bandit -r python/ -f json -o bandit-report.json -ll -x "python/tests/*,python/test_*.py" || true
+        echo "✅ Bandit scan completed"
 
-      # ----------------------------------------------------------
-      # Setup Python
-      # ----------------------------------------------------------
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-
-      # ----------------------------------------------------------
-      # Install Bandit
-      # ----------------------------------------------------------
-
-      - name: Install Bandit
-        run: |
-          pip install bandit
-
-
-      # ----------------------------------------------------------
-      # Run Bandit
-      # ----------------------------------------------------------
-
-      - name: Run Bandit security scan
-        run: |
-          echo "🔍 Running Bandit security scan..."
-          
-          bandit -r python/ \
-            -f json \
-            -o bandit-report.json \
-            -ll \
-            -x "python/tests/*,python/test_*.py" || true
-          
-          echo "✅ Bandit scan completed"
-
-
-      # ----------------------------------------------------------
-      # Upload Bandit report
-      # ----------------------------------------------------------
-
-      - name: Upload Bandit report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bandit-report-${{ github.sha }}
-          path: bandit-report.json
-          retention-days: 7
-          if-no-files-found: ignore
-
-
-  # ============================================================
-  # Trivy Security Scan
-  # ============================================================
+    - name: Upload Bandit report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: bandit-report-${{ github.sha }}
+        path: bandit-report.json
+        retention-days: 7
+        if-no-files-found: ignore
 
   trivy-security:
-
     name: Trivy Security Scan
-
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
+    - name: Run Trivy scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-
-      # ----------------------------------------------------------
-      # Run Trivy
-      # ----------------------------------------------------------
-
-      - name: Run Trivy scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-
-
-      # ----------------------------------------------------------
-      # Upload Trivy results
-      # ----------------------------------------------------------
-
-      - name: Upload Trivy results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-results-${{ github.sha }}
-          path: trivy-results.sarif
-          retention-days: 7
-          if-no-files-found: ignore
-
-
-  # ============================================================
-  # CodeQL Security (already in separate workflow)
-  # ============================================================
-
-  # Note: CodeQL is already configured in codeql.yml
-  # This is just a reminder
-
-  security-summary:
-
-    name: Security Scan Summary
-
-    runs-on: ubuntu-latest
-
-    needs:
-      - dependency-check
-      - snyk-security
-      - bandit-security
-      - trivy-security
-
-    if: always()
-
-    steps:
-
-      # ----------------------------------------------------------
-      # Generate summary
-      # ----------------------------------------------------------
-
-      - name: Generate security summary
-        run: |
-          cat > security-summary.md << 'EOF'
-          # 🔒 Security Scan Summary
-          
-          **Repository:** ${{ github.repository }}
-          
-          **Commit:** ${{ github.sha }}
-          
-          **Branch:** ${{ github.ref_name }}
-          
-          **Run ID:** ${{ github.run_id }}
-          
-          ## Scan Results
-          
-          | Scan | Status |
-          |------|--------|
-          | Dependency Check (Safety/OWASP) | ${{ needs.dependency-check.result }} |
-          | Snyk Security | ${{ needs.snyk-security.result }} |
-          | Bandit Security | ${{ needs.bandit-security.result }} |
-          | Trivy Security | ${{ needs.trivy-security.result }} |
-          
-          ## Summary
-          
-          EOF
-          
-          if [ "${{ needs.dependency-check.result }}" = "success" ] && \
-             [ "${{ needs.snyk-security.result }}" = "success" ] && \
-             [ "${{ needs.bandit-security.result }}" = "success" ] && \
-             [ "${{ needs.trivy-security.result }}" = "success" ]; then
-            echo "✅ All security scans passed!" >> security-summary.md
-          else
-            echo "⚠️ Some security scans had issues." >> security-summary.md
-            echo "" >> security-summary.md
-            echo "Check the individual scan artifacts for details." >> security-summary.md
-          fi
-          
-          echo "" >> security-summary.md
-          echo "**Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> security-summary.md
-
-
-      # ----------------------------------------------------------
-      # Upload summary
-      # ----------------------------------------------------------
-
-      - name: Upload security summary
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-summary-${{ github.sha }}
-          path: security-summary.md
-          retention-days: 7
-          if-no-files-found: ignore
+    - name: Upload Trivy results
+      if: always()
+      uses: actions/upload-art

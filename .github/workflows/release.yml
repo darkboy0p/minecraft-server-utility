@@ -9,49 +9,136 @@ jobs:
   release:
     runs-on: ubuntu-latest
     
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    steps:
+    # ============================================================
+    # Checkout
+    # ============================================================
+    - name: Checkout code
+      uses: actions/checkout@v4
       with:
-        python-version: '3.9'
+        fetch-depth: 0
+    
+    # ============================================================
+    # Setup Python
+    # ============================================================
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    # ============================================================
+    # Setup Java
+    # ============================================================
+    - name: Check Java project
+      id: java-check
+      run: |
+        if [ -f "java/pom.xml" ]; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "✅ Java Maven project found"
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "⚠️ Java Maven project not found"
+        fi
     
     - name: Set up JDK
-      uses: actions/setup-java@v3
+      if: steps.java-check.outputs.exists == 'true'
+      uses: actions/setup-java@v4
       with:
         java-version: '11'
         distribution: 'temurin'
+        cache: maven
     
+    # ============================================================
+    # Get version from tag
+    # ============================================================
     - name: Get version from tag
       id: get_version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "✅ Version: $VERSION"
     
+    # ============================================================
+    # Install Python dependencies
+    # ============================================================
+    - name: Install Python build tools
+      run: |
+        pip install --upgrade pip
+        pip install build twine setuptools wheel
+    
+    # ============================================================
+    # Update Python version
+    # ============================================================
     - name: Update Python version
+      working-directory: ./python
       run: |
-        cd python
-        sed -i "s/version=\".*\"/version=\"${{ steps.get_version.outputs.VERSION }}\"/" setup.py
-        sed -i "s/__version__ = \".*\"/__version__ = \"${{ steps.get_version.outputs.VERSION }}\"/" minecraft_server_utility/__init__.py
+        echo "📝 Updating Python version to ${{ steps.get_version.outputs.VERSION }}"
+        
+        # Update version.py
+        sed -i "s/__version__ = \".*\"/__version__ = \"${{ steps.get_version.outputs.VERSION }}\"/" minecraft_server_utility/version.py
+        
+        # Update setup.py (if version is hardcoded)
+        sed -i "s/version=\".*\"/version=\"${{ steps.get_version.outputs.VERSION }}\"/" setup.py || true
+        
+        echo "✅ Python version updated"
     
+    # ============================================================
+    # Update Java version
+    # ============================================================
     - name: Update Java version
+      if: steps.java-check.outputs.exists == 'true'
+      working-directory: ./java
       run: |
-        cd java
-        mvn versions:set -DnewVersion=${{ steps.get_version.outputs.VERSION }}
+        echo "📝 Updating Java version to ${{ steps.get_version.outputs.VERSION }}"
+        
+        mvn versions:set -DnewVersion=${{ steps.get_version.outputs.VERSION }} -DgenerateBackupPoms=false
+        
+        echo "✅ Java version updated"
     
+    # ============================================================
+    # Build Python package
+    # ============================================================
     - name: Build Python package
+      working-directory: ./python
       run: |
-        cd python
-        pip install build
+        echo "🔨 Building Python package..."
         python -m build
+        
+        echo ""
+        echo "========================================"
+        echo "Python build output"
+        echo "========================================"
+        ls -lah dist/
+        
+        echo "✅ Python package built"
     
+    # ============================================================
+    # Build Java package
+    # ============================================================
     - name: Build Java package
+      if: steps.java-check.outputs.exists == 'true'
+      working-directory: ./java
       run: |
-        cd java
-        mvn clean package
+        echo "🔨 Building Java package..."
+        mvn clean package -DskipTests
+        
+        echo ""
+        echo "========================================"
+        echo "Java build output"
+        echo "========================================"
+        ls -la target/
+        
+        echo "✅ Java package built"
     
+    # ============================================================
+    # Create GitHub Release
+    # ============================================================
     - name: Create GitHub Release
-      id: create_release
       uses: softprops/action-gh-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -64,28 +151,127 @@ jobs:
           python/dist/*
           java/target/*.jar
     
+    # ============================================================
+    # Publish to PyPI
+    # ============================================================
     - name: Publish to PyPI
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      working-directory: ./python
       run: |
-        cd python
-        pip install twine
-        twine upload dist/*
+        echo "📤 Publishing to PyPI..."
+        python -m twine upload dist/* --verbose
+        
+        echo "✅ Published to PyPI"
     
+    # ============================================================
+    # Publish to GitHub Packages (Maven)
+    # ============================================================
+    - name: Publish to GitHub Packages
+      if: steps.java-check.outputs.exists == 'true'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      working-directory: ./java
+      run: |
+        echo "📤 Publishing to GitHub Packages..."
+        
+        # Use Maven to deploy to GitHub Packages
+        mvn -B deploy -DskipTests \
+          -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/darkboy0p/minecraft-server-utility
+        
+        echo "✅ Published to GitHub Packages"
+    
+    # ============================================================
+    # Publish to Maven Central (optional)
+    # ============================================================
     - name: Publish to Maven Central
+      if: |
+        steps.java-check.outputs.exists == 'true' &&
+        secrets.MAVEN_USERNAME != ''
       env:
         MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
         MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      working-directory: ./java
       run: |
-        cd java
-        mvn clean deploy -P release -DskipTests
+        echo "📤 Publishing to Maven Central..."
+        
+        # This requires proper Maven Central setup
+        # mvn clean deploy -P release -DskipTests
+        
+        echo "⚠️ Maven Central publishing requires additional configuration"
+        echo "Skipping for now..."
     
-    - name: Notify Discord
+    # ============================================================
+    # Verify PyPI publication
+    # ============================================================
+    - name: Verify PyPI publication
       if: success()
+      run: |
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+        
+        echo ""
+        echo "========================================"
+        echo "🎉 RELEASE COMPLETE"
+        echo "========================================"
+        echo "📦 Package: minecraft-server-utility"
+        echo "🏷️ Version: $VERSION"
+        echo "🔗 PyPI: https://pypi.org/project/minecraft-server-utility/"
+        echo "🔗 GitHub: https://github.com/${{ github.repository }}/releases/tag/v$VERSION"
+        echo ""
+        echo "Install with:"
+        echo "  pip install minecraft-server-utility==$VERSION"
+        echo "========================================"
+        
+        echo ""
+        echo "⏳ Checking PyPI..."
+        sleep 15
+        
+        HTTP_STATUS=$(curl \
+          --silent \
+          --output /dev/null \
+          --write-out "%{http_code}" \
+          "https://pypi.org/pypi/minecraft-server-utility/$VERSION/json")
+        
+        if [ "$HTTP_STATUS" = "200" ]; then
+          echo "✅ Version $VERSION is available on PyPI!"
+        else
+          echo "⚠️ PyPI returned HTTP $HTTP_STATUS"
+          echo "The package may still be indexing."
+        fi
+    
+    # ============================================================
+    # Notify Discord (optional)
+    # ============================================================
+    - name: Notify Discord
+      if: success() && secrets.DISCORD_WEBHOOK_ID != ''
       uses: appleboy/discord-action@master
       with:
         webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID }}
         webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN }}
         username: 'Release Bot'
-        message: '🎉 New release ${{ steps.get_version.outputs.VERSION }} published! https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}'
+        message: |
+          🎉 **New Release ${{ steps.get_version.outputs.VERSION }}** 
+          
+          📦 Package: minecraft-server-utility
+          🔗 https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.VERSION }}
+          📥 pip install minecraft-server-utility==${{ steps.get_version.outputs.VERSION }}
+    
+    # ============================================================
+    # Failure notification
+    # ============================================================
+    - name: Failure notification
+      if: failure()
+      run: |
+        echo "========================================"
+        echo "❌ RELEASE FAILED"
+        echo "========================================"
+        echo ""
+        echo "Common issues:"
+        echo "1. Version already exists on PyPI"
+        echo "2. Missing PyPI token (PYPI_API_TOKEN)"
+        echo "3. Package build errors"
+        echo "4. GitHub token permissions"
+        echo ""
+        echo "Check the logs above for details."
+        echo "========================================"

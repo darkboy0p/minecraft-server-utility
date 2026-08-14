@@ -2,7 +2,9 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [published]
+    types:
+      - published
+
   workflow_dispatch:
 
 jobs:
@@ -16,144 +18,269 @@ jobs:
       attestations: write
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      # ==========================================================
+      # Checkout
+      # ==========================================================
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.10"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install --upgrade build twine setuptools wheel
 
-    - name: Ensure version.py exists
-      run: |
-        mkdir -p python/minecraft_server_utility
-        if [ ! -f "python/minecraft_server_utility/version.py" ]; then
-          echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
-          echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
-          echo "✅ Created version.py"
-        fi
+      # ==========================================================
+      # Python
+      # ==========================================================
 
-    - name: Verify project structure
-      run: |
-        echo "========================================"
-        echo "Repository Structure"
-        echo "========================================"
-        ls -la
-        echo ""
-        echo "Python directory:"
-        ls -la python/
-        echo ""
-        echo "Required files:"
-        test -f README.md && echo "✅ README.md exists" || { echo "❌ README.md missing"; exit 1; }
-        test -f python/setup.py && echo "✅ python/setup.py exists" || { echo "❌ python/setup.py missing"; exit 1; }
-        test -f python/minecraft_server_utility/__init__.py && echo "✅ __init__.py exists" || { echo "❌ __init__.py missing"; exit 1; }
-        test -f python/minecraft_server_utility/version.py && echo "✅ version.py exists" || { echo "❌ version.py missing"; exit 1; }
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
-    - name: Check package version
-      working-directory: ./python
-      run: |
-        python -c "
-import sys
-import os
-sys.path.insert(0, os.getcwd())
-try:
-    from minecraft_server_utility.version import __version__
-    print(f'✅ Package version: {__version__}')
-    if not __version__:
-        raise SystemExit('❌ Package version is empty')
-except Exception as e:
-    print(f'❌ Error: {e}')
-    sys.exit(1)
-"
 
-    - name: Build package
-      working-directory: ./python
-      run: |
-        echo "🔨 Building package..."
-        python -m build
-        echo ""
-        echo "Build output:"
-        ls -lah dist/
-        echo ""
-        test -n "$(find dist -name '*.whl' -print -quit)" || { echo "❌ Wheel not generated"; exit 1; }
-        test -n "$(find dist -name '*.tar.gz' -print -quit)" || { echo "❌ Source distribution not generated"; exit 1; }
-        echo "✅ Wheel and source distribution generated"
+      # ==========================================================
+      # Build dependencies
+      # ==========================================================
 
-    - name: Verify package
-      working-directory: ./python
-      run: |
-        echo "🔍 Checking package..."
-        python -m twine check dist/*
-        echo "✅ Package verification passed"
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade \
+            build \
+            twine \
+            setuptools \
+            wheel
 
-    - name: Test package installation
-      working-directory: ./python
-      run: |
-        echo "🧪 Testing package installation..."
-        python -m venv test-env
-        source test-env/bin/activate
-        pip install dist/*.whl
-        python -c "
-from minecraft_server_utility import ServerPinger, MojangAPI, __version__
-print(f'✅ Package imported successfully')
-print(f'✅ Version: {__version__}')
-"
-        deactivate
-        rm -rf test-env
-        echo "✅ Package installation test passed"
 
-    - name: Generate artifact attestation
-      uses: actions/attest-build-provenance@v2
-      with:
-        subject-path: 'python/dist/*'
+      # ==========================================================
+      # Verify project structure
+      # ==========================================================
 
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        packages-dir: ./python/dist/
-        verbose: true
-        print-hash: true
+      - name: Verify project structure
+        run: |
+          echo "========================================"
+          echo "Repository Structure"
+          echo "========================================"
 
-    - name: Publish to Test PyPI (optional)
-      if: github.event_name == 'workflow_dispatch'
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        repository-url: https://test.pypi.org/legacy/
-        packages-dir: ./python/dist/
-        verbose: true
-        print-hash: true
+          pwd
+          ls -la
 
-    - name: Verify publication
-      if: success()
-      run: |
-        VERSION=$(cd python && python -c "from minecraft_server_utility.version import __version__; print(__version__)")
-        echo ""
-        echo "========================================"
-        echo "🎉 PUBLISH SUCCESSFUL"
-        echo "========================================"
-        echo "📦 Package: minecraft-server-utility"
-        echo "🏷️ Version: $VERSION"
-        echo "🔗 https://pypi.org/project/minecraft-server-utility/"
-        echo ""
-        echo "📥 Install with: pip install minecraft-server-utility==$VERSION"
-        echo "========================================"
+          echo ""
+          echo "Python directory:"
+          ls -la python/
 
-    - name: Failure message
-      if: failure()
-      run: |
-        echo "========================================"
-        echo "❌ PUBLISH FAILED"
-        echo "========================================"
-        echo ""
-        echo "Common issues:"
-        echo "1. Version already exists on PyPI"
-        echo "2. Missing PYPI_API_TOKEN secret"
-        echo "3. Build errors"
-        echo "========================================"
+          echo ""
+          echo "Required files:"
+
+          test -f python/setup.py \
+            && echo "✅ python/setup.py exists" \
+            || { echo "❌ python/setup.py missing"; exit 1; }
+
+          test -f python/README.md \
+            && echo "✅ python/README.md exists" \
+            || { echo "❌ python/README.md missing"; exit 1; }
+
+          test -f python/minecraft_server_utility/__init__.py \
+            && echo "✅ __init__.py exists" \
+            || { echo "❌ __init__.py missing"; exit 1; }
+
+          echo ""
+          echo "✅ Project structure looks good"
+
+
+      # ==========================================================
+      # Check package version
+      # ==========================================================
+
+      - name: Check package version
+        working-directory: ./python
+        run: |
+          python - <<'PY'
+          import minecraft_server_utility
+
+          version = getattr(
+              minecraft_server_utility,
+              "__version__",
+              None
+          )
+
+          if not version:
+              raise SystemExit("❌ __version__ was not found")
+
+          print(f"✅ Package version: {version}")
+          PY
+
+
+      # ==========================================================
+      # Build package
+      # ==========================================================
+
+      - name: Build package
+        working-directory: ./python
+        run: |
+          echo "🔨 Building package..."
+
+          rm -rf build/
+          rm -rf dist/
+          rm -rf *.egg-info
+          rm -rf minecraft_server_utility.egg-info
+
+          python -m build
+
+          echo ""
+          echo "========================================"
+          echo "Build output"
+          echo "========================================"
+
+          ls -lah dist/
+
+          echo ""
+
+          if ! find dist -name "*.whl" -print -quit | grep -q .; then
+            echo "❌ Wheel was not generated"
+            exit 1
+          fi
+
+          if ! find dist -name "*.tar.gz" -print -quit | grep -q .; then
+            echo "❌ Source distribution was not generated"
+            exit 1
+          fi
+
+          echo "✅ Wheel generated"
+          echo "✅ Source distribution generated"
+
+
+      # ==========================================================
+      # Verify package
+      # ==========================================================
+
+      - name: Verify package
+        working-directory: ./python
+        run: |
+          echo "🔍 Checking package metadata..."
+
+          python -m twine check dist/*
+
+          echo "✅ Package verification passed"
+
+
+      # ==========================================================
+      # Test wheel installation
+      # ==========================================================
+
+      - name: Test package installation
+        working-directory: ./python
+        run: |
+          echo "🧪 Testing wheel installation..."
+
+          python -m venv test-env
+
+          source test-env/bin/activate
+
+          python -m pip install --upgrade pip
+
+          python -m pip install dist/*.whl
+
+          python - <<'PY'
+          import minecraft_server_utility
+
+          print("✅ Package imported successfully")
+
+          version = getattr(
+              minecraft_server_utility,
+              "__version__",
+              "unknown"
+          )
+
+          print(f"✅ Version: {version}")
+          PY
+
+          deactivate
+
+          rm -rf test-env
+
+          echo "✅ Package installation test passed"
+
+
+      # ==========================================================
+      # Generate build attestation
+      # ==========================================================
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "python/dist/*"
+
+
+      # ==========================================================
+      # Publish to PyPI
+      # ==========================================================
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ./python/dist/
+          verbose: true
+          print-hash: true
+
+
+      # ==========================================================
+      # Optional TestPyPI
+      # ==========================================================
+
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: ./python/dist/
+          verbose: true
+          print-hash: true
+
+
+      # ==========================================================
+      # Verify publication
+      # ==========================================================
+
+      - name: Verify publication
+        if: success()
+        working-directory: ./python
+        run: |
+          VERSION=$(python -c 'from minecraft_server_utility import __version__; print(__version__)')
+
+          echo ""
+          echo "========================================"
+          echo "🎉 PUBLISH SUCCESSFUL"
+          echo "========================================"
+
+          echo "📦 Package: minecraft-server-utility"
+          echo "🏷️ Version: $VERSION"
+          echo "🔗 https://pypi.org/project/minecraft-server-utility/"
+          echo ""
+          echo "📥 Install with:"
+          echo "pip install minecraft-server-utility==$VERSION"
+
+          echo "========================================"
+
+
+      # ==========================================================
+      # Failure information
+      # ==========================================================
+
+      - name: Failure message
+        if: failure()
+        run: |
+          echo "========================================"
+          echo "❌ PUBLISH FAILED"
+          echo "========================================"
+          echo ""
+          echo "Possible causes:"
+          echo ""
+          echo "1. Version already exists on PyPI"
+          echo "2. Trusted Publishing is not configured"
+          echo "3. PyPI authentication failed"
+          echo "4. Package build failed"
+          echo "5. Package metadata is invalid"
+          echo ""
+          echo "Check the failed step above for the exact error."
+          echo "========================================"

@@ -10,13 +10,14 @@ with open(README, "r", encoding="utf-8") as fh:
 
 
 def get_version():
-    init_file = HERE / "minecraft_server_utility" / "__init__.py"
-
-    with open(init_file, "r", encoding="utf-8") as f:
+    """Get version from version.py"""
+    version_file = HERE / "minecraft_server_utility" / "version.py"
+    
+    with open(version_file, "r", encoding="utf-8") as f:
         for line in f:
             if line.startswith("__version__"):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
-
+    
     return "1.0.0"
 
 
@@ -56,6 +57,7 @@ setup(
             "black>=23.0.0",
             "twine>=4.0.0",
             "build>=0.10.0",
+            "pytest-mock>=3.10.0",
         ],
     },
 

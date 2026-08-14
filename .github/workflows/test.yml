@@ -9,43 +9,38 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    
     strategy:
       matrix:
         python-version: ['3.8', '3.9', '3.10', '3.11']
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: pip
-    
+
     - name: Upgrade pip
-      run: |
-        python -m pip install --upgrade pip setuptools wheel
-    
-    - name: Ensure version.py exists
+      run: python -m pip install --upgrade pip setuptools wheel
+
+    - name: Create version.py if missing
       run: |
         mkdir -p python/minecraft_server_utility
         if [ ! -f "python/minecraft_server_utility/version.py" ]; then
           echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
           echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
-          echo "✅ Created version.py"
         fi
-    
+
     - name: Install package
       working-directory: ./python
-      run: |
-        pip install -e .
-    
+      run: pip install -e .
+
     - name: Install test dependencies
-      run: |
-        pip install pytest pytest-cov pytest-mock requests
-    
+      run: pip install pytest pytest-cov pytest-mock requests
+
     - name: Verify package import
       working-directory: ./python
       run: |
@@ -61,13 +56,13 @@ except Exception as e:
     print(f'❌ Import failed: {e}')
     sys.exit(1)
 "
-    
+
     - name: Run unit tests
       continue-on-error: true
       working-directory: ./python
       run: |
         if [ -d "../tests" ]; then
-          PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ -v --tb=short --disable-warnings || true
+          PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ -v --tb=short --disable-warnings
         else
           echo "⚠️ No tests directory found."
         fi
@@ -75,32 +70,31 @@ except Exception as e:
   integration-tests:
     runs-on: ubuntu-latest
     needs: unit-tests
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         cache: pip
-    
-    - name: Ensure version.py exists
+
+    - name: Create version.py if missing
       run: |
         mkdir -p python/minecraft_server_utility
         if [ ! -f "python/minecraft_server_utility/version.py" ]; then
           echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
           echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
-          echo "✅ Created version.py"
         fi
-    
+
     - name: Install package
       working-directory: ./python
       run: |
         pip install -e .
         pip install requests
-    
+
     - name: Test basic functionality
       working-directory: ./python
       run: |
@@ -123,8 +117,8 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     exit(1)
-        "
-    
+"
+
     - name: Test example scripts
       continue-on-error: true
       working-directory: ./python
@@ -142,7 +136,7 @@ try:
     print('  ✅ Syntax OK')
 except Exception as e:
     print(f'  ⚠️  {type(e).__name__}: {e}')
-              "
+"
             fi
           done
         fi
@@ -151,26 +145,22 @@ except Exception as e:
     runs-on: ubuntu-latest
     needs: [unit-tests, integration-tests]
     if: always()
-    
+
     steps:
     - name: Generate test summary
       run: |
         cat > test-summary.md << 'EOF'
         # Test Summary
-        
         **Repository:** ${{ github.repository }}
         **Commit:** ${{ github.sha }}
-        
         ## Test Results
-        
         | Test Suite | Status |
         |------------|--------|
         | Unit Tests | ${{ needs.unit-tests.result }} |
         | Integration Tests | ${{ needs.integration-tests.result }} |
-        
         **Generated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
         EOF
-    
+
     - name: Upload test summary
       if: always()
       uses: actions/upload-artifact@v4

@@ -21,7 +21,8 @@ Example usage:
     >>> print(f"Players: {info['players']['online']}/{info['players']['max']}")
 """
 
-__version__ = "1.0.0"
+from .version import __version__
+
 __author__ = "darkboy0p"
 __email__ = "wardengamerofficial@gmail.com"
 __license__ = "MIT"

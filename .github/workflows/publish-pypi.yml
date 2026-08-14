@@ -14,6 +14,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
 
     steps:
       # ==========================================================
@@ -194,6 +195,14 @@ jobs:
           echo "✅ Package installation test passed"
 
       # ==========================================================
+      # Generate attestations (new requirement)
+      # ==========================================================
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'python/dist/*'
+
+      # ==========================================================
       # Publish to PyPI (with trusted publishing)
       # ==========================================================
       - name: Publish to PyPI
@@ -201,6 +210,7 @@ jobs:
         with:
           packages-dir: ./python/dist/
           verbose: true
+          print-hash: true
 
       # ==========================================================
       # Publish to Test PyPI (for testing)
@@ -212,6 +222,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: ./python/dist/
           verbose: true
+          print-hash: true
 
       # ==========================================================
       # Verify publication on PyPI

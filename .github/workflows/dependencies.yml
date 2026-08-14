@@ -29,42 +29,32 @@ jobs:
       with:
         python-version: '3.10'
     
+    - name: Ensure version.py exists
+      run: |
+        mkdir -p python/minecraft_server_utility
+        if [ ! -f "python/minecraft_server_utility/version.py" ]; then
+          echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
+          echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
+          echo "✅ Created version.py"
+        fi
+    
     - name: Update Python dependencies
       working-directory: ./python
       run: |
         echo "🔍 Checking Python dependencies..."
-        
-        # Ensure version.py exists
-        if [ ! -f "minecraft_server_utility/version.py" ]; then
-          echo "Creating version.py..."
-          cat > minecraft_server_utility/version.py << 'EOF'
-        """Version information for minecraft-server-utility."""
-        __version__ = "1.0.0"
-        EOF
-        fi
-        
-        # Install pip-tools
         pip install pip-tools
-        
-        # Create requirements.in if it doesn't exist
         if [ ! -f "requirements.in" ]; then
-          echo "📝 Creating requirements.in..."
           if [ -f "requirements.txt" ]; then
             cp requirements.txt requirements.in
           else
             echo "requests>=2.25.0" > requirements.in
           fi
         fi
-        
-        # Update requirements.txt
-        echo "🔄 Updating requirements.txt..."
         pip-compile --upgrade requirements.in -o requirements.txt --resolver=backtracking 2>/dev/null || {
-          echo "⚠️ pip-compile failed, checking existing requirements..."
           if [ ! -f "requirements.txt" ]; then
             echo "requests>=2.25.0" > requirements.txt
           fi
         }
-        
         echo "✅ Python dependencies updated"
     
     - name: Check for Python dependency changes
@@ -72,10 +62,8 @@ jobs:
       working-directory: ./python
       run: |
         if [ -f "requirements.txt" ] && ! git diff --exit-code requirements.txt 2>/dev/null; then
-          echo "Python dependencies have changed"
           echo "has_changes=true" >> $GITHUB_OUTPUT
         else
-          echo "No Python dependency changes"
           echo "has_changes=false" >> $GITHUB_OUTPUT
         fi
     
@@ -84,10 +72,8 @@ jobs:
       run: |
         if [ -f "java/pom.xml" ]; then
           echo "exists=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Java Maven project found"
         else
           echo "exists=false" >> "$GITHUB_OUTPUT"
-          echo "⚠️ Java Maven project not found"
         fi
     
     - name: Setup Java
@@ -103,16 +89,10 @@ jobs:
       working-directory: ./java
       run: |
         echo "🔍 Checking Java dependencies..."
-        
-        cp pom.xml pom.xml.backup 2>/dev/null || true
-        
         mvn versions:update-properties -DgenerateBackupPoms=false 2>/dev/null || true
         mvn versions:use-latest-versions -DgenerateBackupPoms=false -DallowSnapshots=false 2>/dev/null || true
-        
         if ! git diff --exit-code pom.xml 2>/dev/null; then
           echo "✅ Java dependencies updated"
-        else
-          echo "ℹ️ No Java dependency updates"
         fi
     
     - name: Check for Java dependency changes
@@ -121,10 +101,8 @@ jobs:
       working-directory: ./java
       run: |
         if [ -f "pom.xml" ] && ! git diff --exit-code pom.xml 2>/dev/null; then
-          echo "Java dependencies have changed"
           echo "has_changes=true" >> $GITHUB_OUTPUT
         else
-          echo "No Java dependency changes"
           echo "has_changes=false" >> $GITHUB_OUTPUT
         fi
     

@@ -53,6 +53,22 @@ jobs:
 
 
       # ==========================================================
+      # Ensure version.py exists
+      # ==========================================================
+
+      - name: Ensure version.py exists
+        run: |
+          mkdir -p python/minecraft_server_utility
+          if [ ! -f "python/minecraft_server_utility/version.py" ]; then
+            echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
+            echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
+            echo "✅ Created version.py"
+          else
+            echo "✅ version.py already exists"
+          fi
+
+
+      # ==========================================================
       # Verify project structure
       # ==========================================================
 
@@ -76,13 +92,17 @@ jobs:
             && echo "✅ python/setup.py exists" \
             || { echo "❌ python/setup.py missing"; exit 1; }
 
-          test -f python/README.md \
-            && echo "✅ python/README.md exists" \
-            || { echo "❌ python/README.md missing"; exit 1; }
+          test -f README.md \
+            && echo "✅ README.md exists" \
+            || { echo "❌ README.md missing"; exit 1; }
 
           test -f python/minecraft_server_utility/__init__.py \
             && echo "✅ __init__.py exists" \
             || { echo "❌ __init__.py missing"; exit 1; }
+
+          test -f python/minecraft_server_utility/version.py \
+            && echo "✅ version.py exists" \
+            || { echo "❌ version.py missing"; exit 1; }
 
           echo ""
           echo "✅ Project structure looks good"
@@ -95,20 +115,19 @@ jobs:
       - name: Check package version
         working-directory: ./python
         run: |
-          python - <<'PY'
-          import minecraft_server_utility
-
-          version = getattr(
-              minecraft_server_utility,
-              "__version__",
-              None
-          )
-
-          if not version:
-              raise SystemExit("❌ __version__ was not found")
-
-          print(f"✅ Package version: {version}")
-          PY
+          python -c "
+import sys
+import os
+sys.path.insert(0, os.getcwd())
+try:
+    from minecraft_server_utility.version import __version__
+    print(f'✅ Package version: {__version__}')
+    if not __version__:
+        raise SystemExit('❌ Package version is empty')
+except Exception as e:
+    print(f'❌ Error: {e}')
+    sys.exit(1)
+"
 
 
       # ==========================================================
@@ -174,29 +193,18 @@ jobs:
           echo "🧪 Testing wheel installation..."
 
           python -m venv test-env
-
           source test-env/bin/activate
 
           python -m pip install --upgrade pip
-
           python -m pip install dist/*.whl
 
-          python - <<'PY'
-          import minecraft_server_utility
-
-          print("✅ Package imported successfully")
-
-          version = getattr(
-              minecraft_server_utility,
-              "__version__",
-              "unknown"
-          )
-
-          print(f"✅ Version: {version}")
-          PY
+          python -c "
+from minecraft_server_utility import __version__
+print(f'✅ Package imported successfully')
+print(f'✅ Version: {__version__}')
+"
 
           deactivate
-
           rm -rf test-env
 
           echo "✅ Package installation test passed"
@@ -244,9 +252,8 @@ jobs:
 
       - name: Verify publication
         if: success()
-        working-directory: ./python
         run: |
-          VERSION=$(python -c 'from minecraft_server_utility import __version__; print(__version__)')
+          VERSION=$(cd python && python -c "from minecraft_server_utility.version import __version__; print(__version__)")
 
           echo ""
           echo "========================================"

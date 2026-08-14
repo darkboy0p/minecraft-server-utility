@@ -38,8 +38,6 @@ jobs:
           echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
           echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
           echo "✅ Created version.py"
-        else
-          echo "✅ version.py already exists"
         fi
 
     - name: Verify project structure

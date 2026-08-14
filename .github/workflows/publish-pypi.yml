@@ -33,13 +33,13 @@ jobs:
 
     - name: Ensure version.py exists
       run: |
+        mkdir -p python/minecraft_server_utility
         if [ ! -f "python/minecraft_server_utility/version.py" ]; then
-          echo "Creating version.py..."
-          mkdir -p python/minecraft_server_utility
-          cat > python/minecraft_server_utility/version.py << 'EOF'
-        """Version information for minecraft-server-utility."""
-        __version__ = "1.0.0"
-        EOF
+          echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
+          echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
+          echo "✅ Created version.py"
+        else
+          echo "✅ version.py already exists"
         fi
 
     - name: Verify project structure

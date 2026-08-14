@@ -46,7 +46,7 @@ jobs:
       - name: Verify project structure
         run: |
           echo "========================================"
-          echo "Repository"
+          echo "Repository Structure"
           echo "========================================"
           pwd
           ls -la
@@ -74,6 +74,10 @@ jobs:
             && echo "✅ __init__.py exists" \
             || { echo "❌ __init__.py missing"; exit 1; }
 
+          test -f python/minecraft_server_utility/version.py \
+            && echo "✅ version.py exists" \
+            || { echo "❌ version.py missing"; exit 1; }
+
       # ==========================================================
       # Check package version
       # ==========================================================
@@ -81,12 +85,34 @@ jobs:
         working-directory: ./python
         run: |
           python - <<'PY'
-          from minecraft_server_utility import __version__
-
-          print(f"✅ Package version: {__version__}")
-
-          if not __version__:
-              raise SystemExit("❌ Package version is empty")
+          import sys
+          import os
+          
+          # Add current directory to path
+          sys.path.insert(0, os.getcwd())
+          
+          try:
+              from minecraft_server_utility.version import __version__
+              print(f"✅ Package version: {__version__}")
+              
+              if not __version__:
+                  raise SystemExit("❌ Package version is empty")
+                  
+              # Check if version matches git tag (if triggered by release)
+              import os
+              github_ref = os.environ.get('GITHUB_REF', '')
+              if github_ref.startswith('refs/tags/v'):
+                  tag_version = github_ref.replace('refs/tags/v', '')
+                  if tag_version != __version__:
+                      print(f"⚠️  Version mismatch: tag={tag_version}, package={__version__}")
+                      print("Continuing anyway...")
+                  
+          except ImportError as e:
+              print(f"❌ Import failed: {e}")
+              sys.exit(1)
+          except Exception as e:
+              print(f"❌ Error: {e}")
+              sys.exit(1)
           PY
 
       # ==========================================================
@@ -120,6 +146,13 @@ jobs:
           echo "✅ Wheel generated"
           echo "✅ Source distribution generated"
 
+          # Show package contents
+          echo ""
+          echo "========================================"
+          echo "Wheel contents"
+          echo "========================================"
+          unzip -l dist/*.whl || true
+
       # ==========================================================
       # Verify package
       # ==========================================================
@@ -133,50 +166,161 @@ jobs:
           echo "✅ Package verification passed"
 
       # ==========================================================
-      # Publish to PyPI
+      # Install and test package locally
+      # ==========================================================
+      - name: Test package installation
+        working-directory: ./python
+        run: |
+          echo "🧪 Testing package installation..."
+          
+          # Create a virtual environment
+          python -m venv test-env
+          source test-env/bin/activate
+          
+          # Install the built package
+          pip install dist/*.whl
+          
+          # Test import
+          python -c "
+          from minecraft_server_utility import ServerPinger, MojangAPI, __version__
+          print(f'✅ Package imported successfully')
+          print(f'✅ Version: {__version__}')
+          print(f'✅ ServerPinger: {ServerPinger}')
+          print(f'✅ MojangAPI: {MojangAPI}')
+          "
+          
+          deactivate
+          rm -rf test-env
+          echo "✅ Package installation test passed"
+
+      # ==========================================================
+      # Publish to PyPI (with trusted publishing)
       # ==========================================================
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: ./python/dist/
+          verbose: true
 
       # ==========================================================
-      # Verify publication
+      # Publish to Test PyPI (for testing)
+      # ==========================================================
+      - name: Publish to Test PyPI (optional)
+        if: github.event_name == 'workflow_dispatch'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: ./python/dist/
+          verbose: true
+
+      # ==========================================================
+      # Verify publication on PyPI
       # ==========================================================
       - name: Verify publication
         if: success()
         run: |
+          VERSION=$(cd python && python -c "from minecraft_server_utility.version import __version__; print(__version__)")
+          
           echo "🎉 Successfully published to PyPI!"
-
-          VERSION=$(cd python && python -c "from minecraft_server_utility import __version__; print(__version__)")
-
+          
           echo ""
           echo "========================================"
-          echo "PyPI Package"
+          echo "📦 PyPI Package"
           echo "========================================"
           echo "Package: minecraft-server-utility"
           echo "Version: $VERSION"
           echo "URL: https://pypi.org/project/minecraft-server-utility/"
-
           echo ""
-          echo "Waiting for PyPI index..."
+          echo "Install it with:"
+          echo "pip install minecraft-server-utility"
+          
+          echo ""
+          echo "⏳ Waiting for PyPI index to update..."
           sleep 15
-
+          
           echo ""
-          echo "Checking PyPI..."
-
+          echo "🔍 Checking PyPI..."
+          
+          # Check if package is available
           HTTP_STATUS=$(curl \
             --silent \
             --output /dev/null \
             --write-out "%{http_code}" \
             "https://pypi.org/pypi/minecraft-server-utility/$VERSION/json")
-
+          
           if [ "$HTTP_STATUS" = "200" ]; then
             echo "✅ Version $VERSION is available on PyPI!"
+            
+            # Get package info
+            curl --silent "https://pypi.org/pypi/minecraft-server-utility/$VERSION/json" | \
+              python -m json.tool | grep -E '"name"|"version"|"author"|"license"' || true
           else
             echo "⚠️ PyPI returned HTTP $HTTP_STATUS"
             echo "The package may still be indexing."
+            echo "Check manually at: https://pypi.org/project/minecraft-server-utility/"
           fi
+
+      # ==========================================================
+      # Generate release notes
+      # ==========================================================
+      - name: Generate release notes
+        if: success()
+        run: |
+          VERSION=$(cd python && python -c "from minecraft_server_utility.version import __version__; print(__version__)")
+          
+          cat > release-notes.md << EOF
+          # 🎉 Release $VERSION
+          
+          ## 📦 Package Information
+          
+          - **Package:** minecraft-server-utility
+          - **Version:** $VERSION
+          - **PyPI:** https://pypi.org/project/minecraft-server-utility/
+          
+          ## 🚀 Installation
+          
+          \`\`\`bash
+          pip install minecraft-server-utility
+          \`\`\`
+          
+          ## ✨ Features
+          
+          - ✅ Java Edition server status
+          - ✅ Bedrock Edition server status
+          - ✅ Player UUID lookups
+          - ✅ Minecraft profile information
+          - ✅ Skin and cape URLs
+          - ✅ Player utilities
+          - ✅ Server monitoring
+          - ✅ Exception handling
+          
+          ## 📝 Changelog
+          
+          See [CHANGELOG.md](https://github.com/darkboy0p/minecraft-server-utility/blob/main/CHANGELOG.md) for full details.
+          
+          ## 🔗 Links
+          
+          - [GitHub Repository](https://github.com/darkboy0p/minecraft-server-utility)
+          - [Documentation](https://github.com/darkboy0p/minecraft-server-utility#readme)
+          - [Issues](https://github.com/darkboy0p/minecraft-server-utility/issues)
+          
+          ---
+          
+          *Released on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")*
+          EOF
+          
+          echo "✅ Release notes generated"
+
+      # ==========================================================
+      # Upload release notes
+      # ==========================================================
+      - name: Upload release notes
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
 
       # ==========================================================
       # Success message
@@ -184,11 +328,34 @@ jobs:
       - name: Success
         if: success()
         run: |
-          VERSION=$(cd python && python -c "from minecraft_server_utility import __version__; print(__version__)")
-
+          VERSION=$(cd python && python -c "from minecraft_server_utility.version import __version__; print(__version__)")
+          
           echo "========================================"
           echo "🎉 PUBLISH SUCCESSFUL"
           echo "========================================"
           echo "📦 Package: minecraft-server-utility"
           echo "🏷️ Version: $VERSION"
           echo "🔗 https://pypi.org/project/minecraft-server-utility/"
+          echo ""
+          echo "📥 Install with:"
+          echo "pip install minecraft-server-utility==$VERSION"
+          echo "========================================"
+
+      # ==========================================================
+      # Failure message
+      # ==========================================================
+      - name: Failure
+        if: failure()
+        run: |
+          echo "========================================"
+          echo "❌ PUBLISH FAILED"
+          echo "========================================"
+          echo ""
+          echo "Common issues:"
+          echo "1. Version already exists on PyPI"
+          echo "2. Missing or invalid PyPI token"
+          echo "3. Package name already taken"
+          echo "4. Build errors"
+          echo ""
+          echo "Check the logs above for details."
+          echo "========================================"

@@ -8,139 +8,52 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
       packages: write
       id-token: write
-      attestations: write
 
     steps:
-    - name: Checkout code
+    - name: Checkout
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Set up Python
+    - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: Check Java project
-      id: java-check
+    - name: Create version.py
       run: |
-        if [ -f "java/pom.xml" ]; then
-          echo "exists=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Java Maven project found"
-        else
-          echo "exists=false" >> "$GITHUB_OUTPUT"
-          echo "⚠️ Java Maven project not found"
-        fi
+        mkdir -p python/minecraft_server_utility
+        echo '"""Version info"""' > python/minecraft_server_utility/version.py
+        echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
 
-    - name: Set up JDK
-      if: steps.java-check.outputs.exists == 'true'
-      uses: actions/setup-java@v5
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-        cache: maven
-
-    - name: Get version from tag
-      id: get_version
+    - name: Get version
+      id: version
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-        echo "✅ Version: $VERSION"
 
-    - name: Install Python build tools
-      run: |
-        pip install --upgrade pip
-        pip install build twine setuptools wheel
-
-    - name: Ensure version.py exists
-      run: |
-        mkdir -p python/minecraft_server_utility
-        if [ ! -f "python/minecraft_server_utility/version.py" ]; then
-          echo '"""Version information for minecraft-server-utility."""' > python/minecraft_server_utility/version.py
-          echo '__version__ = "1.0.0"' >> python/minecraft_server_utility/version.py
-          echo "✅ Created version.py"
-        fi
-
-    - name: Update Python version
+    - name: Update version
       working-directory: ./python
       run: |
-        echo "📝 Updating Python version to ${{ steps.get_version.outputs.VERSION }}"
-        sed -i "s/__version__ = \".*\"/__version__ = \"${{ steps.get_version.outputs.VERSION }}\"/" minecraft_server_utility/version.py
-        echo "✅ Python version updated"
+        sed -i "s/__version__ = \".*\"/__version__ = \"${{ steps.version.outputs.VERSION }}\"/" minecraft_server_utility/version.py
 
-    - name: Update Java version
-      if: steps.java-check.outputs.exists == 'true'
-      working-directory: ./java
-      run: |
-        echo "📝 Updating Java version to ${{ steps.get_version.outputs.VERSION }}"
-        mvn versions:set -DnewVersion=${{ steps.get_version.outputs.VERSION }} -DgenerateBackupPoms=false
-        echo "✅ Java version updated"
-
-    - name: Build Python package
+    - name: Build
       working-directory: ./python
       run: |
-        echo "🔨 Building Python package..."
+        pip install build
         python -m build
-        ls -lah dist/
-        echo "✅ Python package built"
 
-    - name: Build Java package
-      if: steps.java-check.outputs.exists == 'true'
-      working-directory: ./java
-      run: |
-        echo "🔨 Building Java package..."
-        mvn clean package -DskipTests
-        ls -la target/
-        echo "✅ Java package built"
-
-    - name: Create GitHub Release
+    - name: Create Release
       uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        name: Release ${{ steps.get_version.outputs.VERSION }}
-        draft: false
-        prerelease: false
+        files: python/dist/*
         generate_release_notes: true
-        files: |
-          python/dist/*
-          java/target/*.jar
 
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         packages-dir: ./python/dist/
-        verbose: true
-        print-hash: true
-
-    - name: Publish to GitHub Packages
-      if: steps.java-check.outputs.exists == 'true'
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      working-directory: ./java
-      run: |
-        echo "📤 Publishing to GitHub Packages..."
-        mvn -B deploy -DskipTests \
-          -DaltDeploymentRepository=github::default::https://maven.pkg.github.com/darkboy0p/minecraft-server-utility
-        echo "✅ Published to GitHub Packages"
-
-    - name: Verify publication
-      if: success()
-      run: |
-        VERSION="${{ steps.get_version.outputs.VERSION }}"
-        echo ""
-        echo "========================================"
-        echo "🎉 RELEASE COMPLETE"
-        echo "========================================"
-        echo "📦 Package: minecraft-server-utility"
-        echo "🏷️ Version: $VERSION"
-        echo "🔗 PyPI: https://pypi.org/project/minecraft-server-utility/"
-        echo "🔗 GitHub: https://github.com/${{ github.repository }}/releases/tag/v$VERSION"
-        echo ""
-        echo "Install with: pip install minecraft-server-utility==$VERSION"
-        echo "========================================"

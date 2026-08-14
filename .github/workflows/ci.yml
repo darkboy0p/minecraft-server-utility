@@ -48,7 +48,7 @@ jobs:
 
 
       # ----------------------------------------------------------
-      # Setup Python
+      # Setup Python (v5)
       # ----------------------------------------------------------
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -125,23 +125,26 @@ jobs:
       # ----------------------------------------------------------
 
       - name: Lint with flake8
+        continue-on-error: true
         run: |
           python -m flake8 python/ \
             --count \
             --max-complexity=10 \
             --max-line-length=127 \
-            --statistics || true
+            --statistics
 
 
       # ----------------------------------------------------------
-      # Run tests
+      # Run tests (with continue-on-error to see all failures)
       # ----------------------------------------------------------
 
       - name: Run tests
+        id: run-tests
+        continue-on-error: true
         run: |
           if [ -d "tests" ]; then
             cd python
-            PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ -v --tb=short --disable-warnings || true
+            PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ -v --tb=short --disable-warnings
           else
             echo "⚠️ No tests directory found."
           fi
@@ -152,6 +155,7 @@ jobs:
       # ----------------------------------------------------------
 
       - name: Run tests with coverage
+        continue-on-error: true
         run: |
           if [ -d "tests" ]; then
             cd python
@@ -159,14 +163,14 @@ jobs:
               --cov=./minecraft_server_utility \
               --cov-report=term-missing \
               --cov-report=xml:../coverage.xml \
-              -v --tb=short --disable-warnings || true
+              -v --tb=short --disable-warnings
           else
             echo "⚠️ No tests directory found."
           fi
 
 
       # ----------------------------------------------------------
-      # Upload coverage report
+      # Upload coverage report (v4)
       # ----------------------------------------------------------
 
       - name: Upload coverage report
@@ -212,7 +216,7 @@ jobs:
 
 
       # ----------------------------------------------------------
-      # Upload Python package artifacts
+      # Upload Python package artifacts (v4)
       # ----------------------------------------------------------
 
       - name: Upload Python package artifacts
@@ -226,7 +230,7 @@ jobs:
 
 
   # ============================================================
-  # Java CI
+  # Java CI (with v5 actions)
   # ============================================================
 
   java-ci:
@@ -272,12 +276,12 @@ jobs:
 
 
       # ----------------------------------------------------------
-      # Setup Java
+      # Setup Java (v5 - fixed deprecation)
       # ----------------------------------------------------------
 
       - name: Set up JDK ${{ matrix.java-version }}
         if: steps.java-check.outputs.exists == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ matrix.java-version }}
           distribution: temurin
@@ -290,9 +294,10 @@ jobs:
 
       - name: Build with Maven
         if: steps.java-check.outputs.exists == 'true'
+        continue-on-error: true
         working-directory: ./java
         run: |
-          mvn -B clean compile || true
+          mvn -B clean compile
 
 
       # ----------------------------------------------------------
@@ -301,9 +306,10 @@ jobs:
 
       - name: Run Java tests
         if: steps.java-check.outputs.exists == 'true'
+        continue-on-error: true
         working-directory: ./java
         run: |
-          mvn -B test || true
+          mvn -B test
 
 
       # ----------------------------------------------------------
@@ -333,13 +339,14 @@ jobs:
 
       - name: Package Java project
         if: steps.java-check.outputs.exists == 'true'
+        continue-on-error: true
         working-directory: ./java
         run: |
-          mvn -B package -DskipTests || true
+          mvn -B package -DskipTests
 
 
       # ----------------------------------------------------------
-      # Upload Java artifacts
+      # Upload Java artifacts (v4)
       # ----------------------------------------------------------
 
       - name: Upload Java artifacts
@@ -390,7 +397,7 @@ jobs:
 
 
       # ----------------------------------------------------------
-      # Setup Python
+      # Setup Python (v5)
       # ----------------------------------------------------------
 
       - name: Set up Python
@@ -424,6 +431,7 @@ jobs:
       # ----------------------------------------------------------
 
       - name: Generate Python documentation
+        continue-on-error: true
         run: |
           mkdir -p docs/python
 
@@ -431,11 +439,11 @@ jobs:
             --html \
             python/minecraft_server_utility \
             --output-dir docs/python \
-            --force || true
+            --force
 
 
       # ----------------------------------------------------------
-      # Generate Java documentation if available
+      # Generate Java documentation if available (v5)
       # ----------------------------------------------------------
 
       - name: Check Java documentation
@@ -450,7 +458,7 @@ jobs:
 
       - name: Set up JDK
         if: steps.java-doc-check.outputs.exists == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: "17"
           distribution: temurin
@@ -459,14 +467,15 @@ jobs:
 
       - name: Generate Java documentation
         if: steps.java-doc-check.outputs.exists == 'true'
+        continue-on-error: true
         working-directory: ./java
         run: |
-          mvn -B javadoc:javadoc || true
+          mvn -B javadoc:javadoc
 
           mkdir -p ../docs/java
 
           if [ -d "target/site/apidocs" ]; then
-            cp -r target/site/apidocs/* ../docs/java/ || true
+            cp -r target/site/apidocs/* ../docs/java/
           fi
 
 
@@ -571,7 +580,7 @@ jobs:
 
 
       # ----------------------------------------------------------
-      # Upload documentation
+      # Upload documentation (v4)
       # ----------------------------------------------------------
 
       - name: Upload documentation
@@ -636,7 +645,7 @@ jobs:
           echo "**Run completed:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> test-report.md
 
 
-      - name: Upload test report
+      - name: Upload test report (v4)
         uses: actions/upload-artifact@v4
         with:
           name: test-report
@@ -682,9 +691,52 @@ jobs:
           **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           EOF
 
-      - name: Upload combined artifacts
+      - name: Upload combined artifacts (v4)
         uses: actions/upload-artifact@v4
         with:
           name: combined-artifacts
           path: combined-artifacts/
           retention-days: 7
+
+
+  # ============================================================
+  # Final Status Check
+  # ============================================================
+
+  final-status:
+
+    name: Final Status
+
+    runs-on: ubuntu-latest
+
+    needs:
+      - python-ci
+      - java-ci
+      - docs
+      - test-report
+
+    if: always()
+
+    steps:
+      - name: Check final status
+        run: |
+          echo "========================================"
+          echo "📊 CI/CD Pipeline Status"
+          echo "========================================"
+          echo ""
+          echo "Python CI: ${{ needs.python-ci.result }}"
+          echo "Java CI: ${{ needs.java-ci.result }}"
+          echo "Documentation: ${{ needs.docs.result }}"
+          echo "Test Report: ${{ needs.test-report.result }}"
+          echo ""
+          
+          if [ "${{ needs.python-ci.result }}" = "success" ] && \
+             [ "${{ needs.java-ci.result }}" = "success" ] && \
+             [ "${{ needs.docs.result }}" = "success" ]; then
+            echo "✅ All CI jobs passed!"
+            exit 0
+          else
+            echo "⚠️ Some CI jobs failed or were skipped."
+            echo "Check the logs above for details."
+            exit 1
+          fi

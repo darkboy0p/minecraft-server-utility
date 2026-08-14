@@ -32,28 +32,15 @@ jobs:
     - name: Create test directory if missing
       working-directory: ./python
       run: |
-        mkdir -p tests
-        if [ ! -f "tests/__init__.py" ]; then
-          touch tests/__init__.py
-        fi
-        if [ ! -f "tests/test_basic.py" ]; then
-          echo "Creating basic test file..."
-          cat > tests/test_basic.py << 'EOF'
-import unittest
-
-class TestBasic(unittest.TestCase):
-    def test_basic(self):
-        self.assertTrue(True)
-
-if __name__ == '__main__':
-    unittest.main()
-EOF
+        mkdir -p ../tests
+        if [ ! -f "../tests/__init__.py" ]; then
+          touch ../tests/__init__.py
         fi
     
     - name: Run unit tests
-      working-directory: ./python
       run: |
-        python -m pytest tests/ -v --tb=short
+        cd python
+        PYTHONPATH=$PYTHONPATH:$(pwd) python -m pytest ../tests/ -v --tb=short
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -92,7 +79,7 @@ try:
     utils = PlayerUtils()
     print('✅ PlayerUtils created')
     
-    print('\\n✅ All basic tests passed!')
+    print('\n✅ All basic tests passed!')
 except Exception as e:
     print(f'❌ Test failed: {e}')
     import traceback
@@ -104,8 +91,8 @@ except Exception as e:
       working-directory: ./python
       run: |
         echo "Checking example scripts..."
-        if [ -d "examples" ]; then
-          for example in examples/*.py; do
+        if [ -d "../examples" ]; then
+          for example in ../examples/*.py; do
             if [ -f "$example" ]; then
               echo "Checking $example..."
               python -c "
@@ -129,7 +116,7 @@ except Exception as e:
   benchmark:
     runs-on: ubuntu-latest
     needs: unit-tests
-    if: github.ref == 'refs/heads/main'  # Only run on main branch
+    if: github.ref == 'refs/heads/main'
     
     steps:
     - name: Checkout repository
@@ -146,11 +133,11 @@ except Exception as e:
         pip install -e .
         
         echo "Running simple performance test..."
-        cat > benchmark.py << 'EOF'
+        cat > ../benchmark.py << 'EOF'
 import time
 
 def benchmark():
-    """Simple benchmark test"""
+    \"\"\"Simple benchmark test\"\"\"
     start = time.time()
     
     # Import test
@@ -180,4 +167,4 @@ if __name__ == "__main__":
     benchmark()
 EOF
         
-        python benchmark.py
+        python ../benchmark.py
